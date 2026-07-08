@@ -4,12 +4,11 @@
 #
 # Valida, contra o Caddy local (antes do túnel), tudo que o Caddyfile promete:
 #   health/live, health/ready, página de status, allowlist de rotas e métodos,
-#   respostas de CORS bloqueado, gate opcional de API key e uma conversão real.
+#   respostas de CORS bloqueado e uma conversão real.
 #
 # Uso:
 #   ./smoke-test.sh                         # usa http://localhost:42811
 #   BASE_URL=http://localhost:42811 ./smoke-test.sh
-#   DOCX_API_KEY=sua-chave ./smoke-test.sh  # também valida o gate de API key
 #   ORIGIN=https://crm-advogado.onrender.com ./smoke-test.sh   # origin permitida p/ o teste de CORS
 #
 # Requisitos: bash, curl, base64. No Windows use o Git Bash.
@@ -19,8 +18,6 @@ set -u
 
 BASE_URL="${BASE_URL:-http://localhost:42811}"
 ALLOWED_ORIGIN="${ORIGIN:-https://crm-advogado.onrender.com}"
-API_KEY="${DOCX_API_KEY:-}"
-
 pass=0
 fail=0
 green() { printf '\033[32m%s\033[0m' "$1"; }
@@ -40,7 +37,6 @@ status_of() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
 echo "== Smoke test do serviço DOCX =="
 echo "   BASE_URL = $BASE_URL"
 echo "   ORIGIN   = $ALLOWED_ORIGIN"
-[ -n "$API_KEY" ] && echo "   API_KEY  = (definida — o gate será testado)" || echo "   API_KEY  = (vazia — gate desligado)"
 echo
 
 # 1) Liveness -----------------------------------------------------------------
@@ -81,20 +77,13 @@ preflight_code="$(status_of -X OPTIONS \
   "$BASE_URL/api/documenteditor/Import")"
 check "preflight de origin permitida ($ALLOWED_ORIGIN)" 204 "$preflight_code"
 
-# 8) Gate de API key (só se DOCX_API_KEY estiver definida) --------------------
-if [ -n "$API_KEY" ]; then
-  noauth_code="$(status_of -X POST "$BASE_URL/api/documenteditor/Import")"
-  check "sem X-Api-Key -> 401" 401 "$noauth_code"
-fi
-
-# 9) Conversão real (POST Import de um DOCX mínimo) --------------------------
+# 8) Conversão real (POST Import de um DOCX mínimo) --------------------------
 TEST_DOCX_B64="UEsDBBQAAAAIAOue51zJTxqw6wAAAK4BAAATAAAAW0NvbnRlbnRfVHlwZXNdLnhtbH1QvU7DMBDeeQrLK4odGBBCSTrwMwJDeYCTfUks7LPlc0v79jht6YAK4933q69b7YIXW8zsIvXyRrVSIJloHU29/Fi/NPdScAGy4CNhL/fIcjVcdet9QhZVTNzLuZT0oDWbGQOwigmpImPMAUo986QTmE+YUN+27Z02kQpSacriIYfuCUfY+CKed/V9LJLRsxSPR+KS1UtIyTsDpeJ6S/ZXSnNKUFV54PDsEl9XgtQXExbk74CT7q0uk51F8Q65vEKoLP0Vs9U2mk2oSvW/zYWecRydwbN+cUs5GmSukwevzkgARz/99WHu4RtQSwMEFAAAAAgA657nXLmBRHGwAAAAKgEAAAsAAABfcmVscy8ucmVsc43POw7CMAwG4J1TRN5pWgaEUJMuCKkrKgeIEjeNaB5KwqO3JwMDIAZG278/y233sDO5YUzGOwZNVQNBJ70yTjM4D8f1DkjKwikxe4cMFkzQ8VV7wlnkspMmExIpiEsMppzDntIkJ7QiVT6gK5PRRytyKaOmQciL0Eg3db2l8d0A/mGSXjGIvWqADEvAf2w/jkbiwcurRZd/nPhKFFlEjZnB3UdF1atdFRYob+nHi/wJUEsDBBQAAAAIAOue51w8eLmYnQAAAM8AAAARAAAAd29yZC9kb2N1bWVudC54bWxFjjEOwjAMRXdOEWWnKQwIVU27cYJygJCYtlJjR3Gg9PYkZWB5/l+2vn/bf/wi3hB5JtTyVNVSAFpyM45a3ofb8SoFJ4POLISg5QYs++7Qro0j+/KASeQE5GbVckopNEqxncAbrigA5t2Tojcp2ziqlaILkSww5wd+Uee6vihvZpRdjnyQ28oMBbEgdQNwglYVWRh3hp2/c/Wv0n0BUEsBAhQAFAAAAAgA657nXMlPGrDrAAAArgEAABMAAAAAAAAAAAAAAIABAAAAAFtDb250ZW50X1R5cGVzXS54bWxQSwECFAAUAAAACADrnudcuYFEcbAAAAAqAQAACwAAAAAAAAAAAAAAgAEcAQAAX3JlbHMvLnJlbHNQSwECFAAUAAAACADrnudcPHi5mJ0AAADPAAAAEQAAAAAAAAAAAAAAgAH1AQAAd29yZC9kb2N1bWVudC54bWxQSwUGAAAAAAMAAwC5AAAAwQIAAAAA"
 
 tmpdocx="$(mktemp -t smoke-XXXXXX.docx 2>/dev/null || echo "${TMPDIR:-/tmp}/smoke-test.docx")"
 printf '%s' "$TEST_DOCX_B64" | base64 -d > "$tmpdocx" 2>/dev/null
 
 conv_headers=(-H "Origin: $ALLOWED_ORIGIN")
-[ -n "$API_KEY" ] && conv_headers+=(-H "X-Api-Key: $API_KEY")
 
 conv_out="$(curl -s -w '\n%{http_code}' "${conv_headers[@]}" \
   -X POST "$BASE_URL/api/documenteditor/Import" \

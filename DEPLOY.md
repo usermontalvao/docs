@@ -49,7 +49,6 @@ expõe pra internet (com HTTPS) é o túnel.
 >   Colar só o compose = build sem os arquivos = os erros que você viu.
 > - As variáveis vão na aba **"Environment variables"** do stack (não em `.env.server`):
 >   - `SYNCFUSION_LICENSE_KEY` = sua licença
->   - `DOCX_API_KEY` = deixe vazio (ou uma chave, se for ligar o gate)
 > - O Caddy é **imagem custom** (`build:`). Garanta que o Portainer **buildte** o Dockerfile
 >   (não force "pull" da `docx-caddy-ratelimit:local`, que não existe em registry).
 > - Editou o `Caddyfile` (ex.: CORS)? Faça **git push** e **redeploy com rebuild** — o
@@ -61,7 +60,7 @@ expõe pra internet (com HTTPS) é o túnel.
 - [ ] Dentro dela:
       ```bash
       cp .env.server.example .env.server
-      nano .env.server        # preencha SYNCFUSION_LICENSE_KEY (DOCX_API_KEY é opcional)
+      nano .env.server        # preencha SYNCFUSION_LICENSE_KEY
       ```
 
 ### 2. Ajustar CORS
@@ -80,7 +79,7 @@ expõe pra internet (com HTTPS) é o túnel.
 
 ### 4. Subir os containers (via CLI)
 - [ ] ```bash
-      # --env-file lê SYNCFUSION_LICENSE_KEY/DOCX_API_KEY; --build compila o Caddy com rate limit
+      # --env-file lê SYNCFUSION_LICENSE_KEY; --build compila o Caddy com rate limit
       docker compose --env-file .env.server up -d --build
       docker compose ps              # os dois containers "running"
       docker compose logs -f caddy
@@ -166,45 +165,16 @@ túnel (Cloudflare/ngrok) fica na frente com as proteções dele (DDoS, etc.). A
 - **Limite de upload:** 30 MB por requisição (`request_body max_size`) — evita estourar a memória do conversor.
 - **Headers de segurança:** `X-Content-Type-Options`, `Referrer-Policy`, remoção do header `Server`.
 
-### (Opcional) Exigir X-Api-Key
-
-Camada extra contra abuso casual. **Limitação honesta:** como o CRM é um SPA, a chave vai no
-bundle do navegador e é legível — não protege contra atacante dedicado, só corta script bobo.
-As defesas reais são o rate limit e o limite de tamanho acima.
-
-Para ligar:
-
-1. Defina `DOCX_API_KEY=<uma-chave-aleatoria>` no `.env.server` (ou na aba de env do Portainer).
-2. **Rebuild** da imagem do Caddy — o gate **auto-ativa** quando a chave não está vazia
-   (não precisa mais editar o Caddyfile; o bloco `@unauthorized` já vive no arquivo e se
-   liga sozinho). O valor é embutido na imagem no build, então trocar a chave exige rebuild.
-3. No frontend (repo `CRMlaw`), faça o editor enviar o header. Já existe o gancho
-   `beforeXmlHttpRequestSend` em `src/components/SyncfusionEditor.tsx`; adicione uma env
-   `VITE_DOCX_API_KEY` e injete `{ 'X-Api-Key': import.meta.env.VITE_DOCX_API_KEY }` junto
-   dos headers quando o `serviceUrl` apontar para o servidor docx.
-   No CRM deste workspace, defina `VITE_DOCX_API_KEY` no `.env` local e nas envvars do deploy
-   com o mesmo valor de `DOCX_API_KEY` configurado no servidor do conversor.
-4. `docker compose --env-file .env.server up -d --build` para recompilar e recarregar o Caddy.
-
-Verifique com o smoke test: `DOCX_API_KEY=sua-chave ./smoke-test.sh` deve mostrar
-`sem X-Api-Key -> 401` como **PASS**.
-
-Se `DOCX_API_KEY` ficar vazio, o gate permanece **inativo** e nada quebra.
-OPTIONS (preflight), a página de status e os health endpoints **nunca** exigem a chave.
-
----
-
 ## Smoke test local
 
 Depois de `docker compose up -d` (e antes de mexer no túnel), rode o script de checagem.
 Ele valida health/live, health/ready, a página de status, a allowlist de rotas e métodos,
-as respostas de CORS bloqueado, o gate de API key (se ligado) e uma conversão real:
+as respostas de CORS bloqueado e uma conversão real:
 
 ```bash
 # Git Bash (Windows) ou shell do host Linux. Requer curl + base64.
 ./smoke-test.sh                                 # usa http://localhost:42811
 BASE_URL=http://localhost:42811 ./smoke-test.sh # outra porta
-DOCX_API_KEY=sua-chave ./smoke-test.sh          # também testa o gate de API key
 ```
 
 Saída esperada: todas as linhas `[PASS]` e `Resultado: N ok / 0 falhas` (exit 0).
@@ -221,7 +191,6 @@ Qualquer `[FAIL]` aponta o que quebrou (ex.: conversão sem SFDT = licença inv�
 | Editor do CRM: erro de **CORS** no console (mas curl dá 200) | Origin do CRM fora da allowlist | Adicione a Origin exata no bloco `map {header.Origin}` do Caddyfile e **rebuild** |
 | Tudo volta **403 CORS origin not allowed** | Origin não bate (http vs https, com/sem `www`, porta) | A Origin é o domínio do **CRM**, não o do túnel; copie exatamente do DevTools |
 | Requisições legítimas tomando **429** | Rate limit global porque a `key` não reflete o IP real | Ajuste a `key` do `rate_limit` (`Cf-Connecting-Ip` p/ Cloudflare, `X-Forwarded-For` p/ ngrok) |
-| **401** inesperado na API | `DOCX_API_KEY` foi definida e o gate ativou | Envie `X-Api-Key` no frontend, ou esvazie a chave e rebuilde |
 | DOCX grande falha/timeout | Passou do teto de upload ou do timeout | Suba `request_body max_size` e/ou `read_timeout`/`write_timeout` no Caddyfile |
 | Alterou o Caddyfile e "não mudou nada" | Caddyfile é **embutido na imagem** (COPY) | Rebuild obrigatório: `docker compose up -d --build` |
 | **404** em rotas que antes passavam | Allowlist de rotas: só `/api/documenteditor/*`, `/health/*`, `/status` | Use o caminho `/api/documenteditor/...`; outros são bloqueados de propósito |

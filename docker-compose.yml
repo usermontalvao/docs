@@ -54,10 +54,6 @@ services:
     # Endurecimento: impede escalada de privilégios dentro do container.
     security_opt:
       - no-new-privileges:true
-    environment:
-      # Opcional: só usado se você ligar o gate por API key no Caddyfile.
-      # Vazio = gate desligado. No Portainer, defina na aba "Environment variables".
-      DOCX_API_KEY: ${DOCX_API_KEY:-}
     ports:
       # MODO TÚNEL: publica só no localhost, numa porta ALEATÓRIA -> Caddy interno :8080.
       # O túnel (Cloudflare/ngrok) aponta para http://localhost:42811.

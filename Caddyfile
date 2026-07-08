@@ -11,7 +11,6 @@
 #   - limite de tamanho de upload
 #   - allowlist de ROTAS (tudo fora de /api/documenteditor/*, /health/* e /status -> 404)
 #   - allowlist de MÉTODOS (fora de GET/POST/OPTIONS -> 405)
-#   - gate opcional por X-Api-Key (auto-ativa quando DOCX_API_KEY é definido)
 #   - headers de segurança e remoção de headers que vazam stack
 #   - logs de acesso estruturados (JSON) para diagnóstico
 
@@ -106,28 +105,6 @@
 	@allowed expression {allowed_origin} != ""
 	@preflight_denied expression {http.request.method} == "OPTIONS" && {header.Origin} != "" && {allowed_origin} == ""
 	@cors_denied expression {http.request.method} != "OPTIONS" && {header.Origin} != "" && {allowed_origin} == ""
-
-	# --- Gate por API key (auto-ativa quando DOCX_API_KEY é definido) ---------
-	# {$DOCX_API_KEY} é expandido no build da imagem. Se vier vazio, a 1ª condição
-	# ("" != "") é falsa e o gate fica INATIVO — nada quebra. Ao definir a chave
-	# no ambiente e rebuildar, o gate passa a exigir o header X-Api-Key nas
-	# requisições à API (OPTIONS/preflight fica isento; a página de status e os
-	# health endpoints são tratados ANTES e não passam por aqui).
-	# Frontend: enviar header X-Api-Key (ver DEPLOY.md > Segurança).
-	@unauthorized {
-		path /api/documenteditor/*
-		expression `"{$DOCX_API_KEY}" != "" && {http.request.method} != "OPTIONS" && {http.request.header.X-Api-Key} != "{$DOCX_API_KEY}"`
-	}
-	handle @unauthorized {
-		header @allowed {
-			Access-Control-Allow-Origin "{allowed_origin}"
-			Access-Control-Allow-Methods "GET, POST, OPTIONS"
-			Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With, X-Api-Key"
-			Vary "Origin"
-		}
-		header Content-Type "application/json; charset=utf-8"
-		respond `{"error":"unauthorized","hint":"Requisição sem X-Api-Key válido. Veja DEPLOY.md > Segurança."}` 401
-	}
 
 	# --- Allowlist de MÉTODOS na API -----------------------------------------
 	# O conversor só precisa de GET (metadados) e POST (Import/Save). Qualquer

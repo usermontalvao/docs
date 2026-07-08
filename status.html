@@ -169,11 +169,6 @@ async function runChecks() {
     set('d-lat', 'b-warn', r.ms + ' ms');
     overall('warn', 'Limitado (rate limit)');
     detail.textContent = 'HTTP 429 — muitas requisições. Aguarde 1 min.';
-  } else if (r.status === 401) {
-    set('d-wp', 'b-ok', 'OK'); set('p-wp', 'b-ok');
-    set('d-lic', 'b-warn', 'Bloqueado (API key)'); set('p-lic', 'b-warn');
-    overall('warn', 'Gate de API key ativo');
-    detail.textContent = 'HTTP 401 — o gate X-Api-Key está ligado e esta página não envia a chave.';
   } else {
     set('d-wp', 'b-err', 'Erro ' + r.status); set('p-wp', 'b-err');
     set('d-lic', 'b-warn', 'Verificar'); set('p-lic', 'b-warn');
