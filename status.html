@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Jurius · Servidor de Conversão DOCX — Status</title>
+<style>
+  :root {
+    --bg: #14110e; --card: #1e1a16; --line: #2c2621; --txt: #efe9e2;
+    --muted: #a0958c; --accent: #e45c12; --ok: #3fb950; --warn: #d29922; --err: #f85149;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--txt);
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; line-height: 1.5; }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 32px 20px 60px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  .brand { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
+  .brand .dot { color: var(--accent); }
+  .brand small { display: block; font-size: 12px; font-weight: 400; color: var(--muted); letter-spacing: 0; }
+  .overall { display: inline-flex; align-items: center; gap: 10px; padding: 10px 16px; border-radius: 999px;
+    background: var(--card); border: 1px solid var(--line); font-weight: 600; }
+  .pulse { width: 12px; height: 12px; border-radius: 50%; background: var(--muted); box-shadow: 0 0 0 0 rgba(0,0,0,0); }
+  .pulse.ok { background: var(--ok); animation: p 2s infinite; }
+  .pulse.warn { background: var(--warn); }
+  .pulse.err { background: var(--err); }
+  @keyframes p { 0% { box-shadow: 0 0 0 0 rgba(63,185,80,.5);} 70%{ box-shadow:0 0 0 8px rgba(63,185,80,0);} 100%{box-shadow:0 0 0 0 rgba(63,185,80,0);} }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px,1fr)); gap: 14px; margin-top: 24px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
+  .card h3 { margin: 0 0 4px; font-size: 14px; color: var(--muted); font-weight: 500; }
+  .card .val { font-size: 17px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .card .sub { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .sdot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+  .b-ok { background: var(--ok);} .b-warn{ background: var(--warn);} .b-err{ background: var(--err);} .b-idle{ background: var(--muted);}
+  .pipe { margin-top: 26px; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
+  .pipe h3 { margin: 0 0 14px; font-size: 13px; color: var(--muted); font-weight: 500; text-transform: uppercase; letter-spacing: .05em; }
+  .steps { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .step { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 10px; background: #17130f; border: 1px solid var(--line); font-size: 13px; }
+  .arrow { color: var(--muted); }
+  footer { margin-top: 26px; font-size: 12px; color: var(--muted); }
+  footer code { background: #17130f; border: 1px solid var(--line); padding: 2px 6px; border-radius: 6px; color: var(--txt); word-break: break-all; }
+  .row { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-top: 1px dashed var(--line); }
+  .row:first-child { border-top: 0; }
+  button { background: var(--accent); color: #fff; border: 0; border-radius: 9px; padding: 9px 16px; font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  .muted { color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">jurius<span class="dot">.</span>com.br
+      <small>Servidor de Conversão DOCX · Syncfusion Word Processor</small>
+    </div>
+    <div class="overall"><span id="pulse" class="pulse"></span><span id="overall-txt">Verificando…</span></div>
+  </header>
+
+  <div class="grid">
+    <div class="card"><h3>Túnel & HTTPS</h3>
+      <div class="val"><span id="d-tunnel" class="sdot b-idle"></span><span id="v-tunnel">—</span></div>
+      <div class="sub" id="s-tunnel">Cloudflare Tunnel → Caddy</div></div>
+    <div class="card"><h3>Conversor (Word Processor)</h3>
+      <div class="val"><span id="d-wp" class="sdot b-idle"></span><span id="v-wp">—</span></div>
+      <div class="sub" id="s-wp">Import DOCX → SFDT</div></div>
+    <div class="card"><h3>Licença Syncfusion</h3>
+      <div class="val"><span id="d-lic" class="sdot b-idle"></span><span id="v-lic">—</span></div>
+      <div class="sub" id="s-lic">Chave server-side</div></div>
+    <div class="card"><h3>Latência da conversão</h3>
+      <div class="val"><span id="d-lat" class="sdot b-idle"></span><span id="v-lat">—</span></div>
+      <div class="sub">DOCX de teste (912 B)</div></div>
+  </div>
+
+  <div class="pipe">
+    <h3>Processos / Pipeline</h3>
+    <div class="steps">
+      <div class="step"><span id="p-tunnel" class="sdot b-idle"></span> Cloudflare Tunnel</div>
+      <span class="arrow">→</span>
+      <div class="step"><span id="p-caddy" class="sdot b-idle"></span> Caddy :8080</div>
+      <span class="arrow">→</span>
+      <div class="step"><span id="p-wp" class="sdot b-idle"></span> Word Processor :80</div>
+      <span class="arrow">→</span>
+      <div class="step"><span id="p-lic" class="sdot b-idle"></span> Licença</div>
+    </div>
+    <div style="margin-top:16px; display:flex; gap:12px; align-items:center;">
+      <button id="btn" onclick="runChecks()">Testar agora</button>
+      <span class="muted" id="ts">—</span>
+      <label class="muted" style="margin-left:auto; font-size:12px;"><input type="checkbox" id="auto" checked> auto (30s)</label>
+    </div>
+  </div>
+
+  <footer>
+    <div class="row"><span>Endpoint p/ o CRM (VITE_SYNC_FUSION)</span>
+      <code>https://docs.jurius-api.com/api/documenteditor/</code></div>
+    <div class="row"><span>Origens liberadas (CORS)</span>
+      <span><code>jurius.com.br</code> · <code>www.jurius.com.br</code> · <code>crm-advogado.onrender.com</code></span></div>
+    <div class="row"><span>Detalhe da última checagem</span><span id="detail" class="muted">—</span></div>
+  </footer>
+</div>
+
+<script>
+// DOCX mínimo válido (912 B) usado como sonda de conversão.
+const TEST_DOCX_B64 = "UEsDBBQAAAAIAOue51zJTxqw6wAAAK4BAAATAAAAW0NvbnRlbnRfVHlwZXNdLnhtbH1QvU7DMBDeeQrLK4odGBBCSTrwMwJDeYCTfUks7LPlc0v79jht6YAK4933q69b7YIXW8zsIvXyRrVSIJloHU29/Fi/NPdScAGy4CNhL/fIcjVcdet9QhZVTNzLuZT0oDWbGQOwigmpImPMAUo986QTmE+YUN+27Z02kQpSacriIYfuCUfY+CKed/V9LJLRsxSPR+KS1UtIyTsDpeJ6S/ZXSnNKUFV54PDsEl9XgtQXExbk74CT7q0uk51F8Q65vEKoLP0Vs9U2mk2oSvW/zYWecRydwbN+cUs5GmSukwevzkgARz/99WHu4RtQSwMEFAAAAAgA657nXLmBRHGwAAAAKgEAAAsAAABfcmVscy8ucmVsc43POw7CMAwG4J1TRN5pWgaEUJMuCKkrKgeIEjeNaB5KwqO3JwMDIAZG278/y233sDO5YUzGOwZNVQNBJ70yTjM4D8f1DkjKwikxe4cMFkzQ8VV7wlnkspMmExIpiEsMppzDntIkJ7QiVT6gK5PRRytyKaOmQciL0Eg3db2l8d0A/mGSXjGIvWqADEvAf2w/jkbiwcurRZd/nPhKFFlEjZnB3UdF1atdFRYob+nHi/wJUEsDBBQAAAAIAOue51w8eLmYnQAAAM8AAAARAAAAd29yZC9kb2N1bWVudC54bWxFjjEOwjAMRXdOEWWnKQwIVU27cYJygJCYtlJjR3Gg9PYkZWB5/l+2vn/bf/wi3hB5JtTyVNVSAFpyM45a3ofb8SoFJ4POLISg5QYs++7Qro0j+/KASeQE5GbVckopNEqxncAbrigA5t2Tojcp2ziqlaILkSww5wd+Uee6vihvZpRdjnyQ28oMBbEgdQNwglYVWRh3hp2/c/Wv0n0BUEsBAhQAFAAAAAgA657nXMlPGrDrAAAArgEAABMAAAAAAAAAAAAAAIABAAAAAFtDb250ZW50X1R5cGVzXS54bWxQSwECFAAUAAAACADrnudcuYFEcbAAAAAqAQAACwAAAAAAAAAAAAAAgAEcAQAAX3JlbHMvLnJlbHNQSwECFAAUAAAACADrnudcPHi5mJ0AAADPAAAAEQAAAAAAAAAAAAAAgAH1AQAAd29yZC9kb2N1bWVudC54bWxQSwUGAAAAAAMAAwC5AAAAwQIAAAAA";
+
+function b64ToBytes(b64) {
+  const bin = atob(b64), out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function set(id, cls, txt) {
+  const d = document.getElementById(id);
+  if (d) { d.className = 'sdot ' + cls; }
+  if (txt != null) { const v = document.getElementById(id.replace(/^[dp]-/, 'v-')); if (v) v.textContent = txt; }
+}
+function overall(state, txt) {
+  document.getElementById('pulse').className = 'pulse ' + state;
+  document.getElementById('overall-txt').textContent = txt;
+}
+
+async function checkConversion() {
+  const bytes = b64ToBytes(TEST_DOCX_B64);
+  const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+  const fd = new FormData();
+  fd.append('files', new File([blob], 'teste.docx', { type: blob.type }));
+  const t0 = performance.now();
+  try {
+    const res = await fetch('/api/documenteditor/Import', { method: 'POST', body: fd });
+    const ms = Math.round(performance.now() - t0);
+    const txt = await res.text();
+    let sfdt = null;
+    try { sfdt = JSON.parse(txt).sfdt; } catch (_) { sfdt = txt && txt.length > 80 ? txt : null; }
+    return { ok: res.ok && !!sfdt, status: res.status, ms, sfdtLen: sfdt ? sfdt.length : 0, body: txt.slice(0, 160) };
+  } catch (e) {
+    return { network: true, ms: Math.round(performance.now() - t0), error: String(e) };
+  }
+}
+
+async function runChecks() {
+  const btn = document.getElementById('btn'); btn.disabled = true; btn.textContent = 'Testando…';
+  overall('warn', 'Verificando…');
+  ['tunnel','wp','lic'].forEach(k => { set('d-'+k, 'b-idle'); set('p-'+k, 'b-idle'); });
+  set('d-lat', 'b-idle', '—');
+
+  // Túnel & Caddy: se esta página carregou, ambos estão de pé.
+  const https = location.protocol === 'https:';
+  set('d-tunnel', https ? 'b-ok' : 'b-warn', https ? 'Conectado' : 'Sem HTTPS');
+  document.getElementById('s-tunnel').textContent = 'Protocolo: ' + location.protocol.replace(':','').toUpperCase();
+  set('p-tunnel', https ? 'b-ok' : 'b-warn');
+  set('p-caddy', 'b-ok');
+
+  const r = await checkConversion();
+  const detail = document.getElementById('detail');
+
+  if (r.network) {
+    set('d-wp', 'b-err', 'Sem resposta'); set('p-wp', 'b-err');
+    set('d-lic', 'b-idle', 'Indeterminado'); set('p-lic', 'b-idle');
+    set('d-lat', 'b-err', '—');
+    overall('err', 'Fora do ar');
+    detail.textContent = 'Falha de rede: ' + r.error;
+  } else if (r.ok) {
+    set('d-wp', 'b-ok', 'Operacional'); set('p-wp', 'b-ok');
+    set('d-lic', 'b-ok', 'Ativa'); set('p-lic', 'b-ok');
+    document.getElementById('s-lic').textContent = 'Conversão autorizada (SFDT válido)';
+    set('d-lat', r.ms < 1500 ? 'b-ok' : 'b-warn', r.ms + ' ms');
+    overall('ok', 'Operacional');
+    detail.textContent = 'HTTP ' + r.status + ' · SFDT ' + r.sfdtLen.toLocaleString('pt-BR') + ' chars · ' + r.ms + ' ms';
+  } else if (r.status === 429) {
+    set('d-wp', 'b-warn', 'Rate limit'); set('p-wp', 'b-warn');
+    set('d-lic', 'b-idle', 'Indeterminado'); set('p-lic', 'b-idle');
+    set('d-lat', 'b-warn', r.ms + ' ms');
+    overall('warn', 'Limitado (rate limit)');
+    detail.textContent = 'HTTP 429 — muitas requisições. Aguarde 1 min.';
+  } else if (r.status === 401) {
+    set('d-wp', 'b-ok', 'OK'); set('p-wp', 'b-ok');
+    set('d-lic', 'b-warn', 'Bloqueado (API key)'); set('p-lic', 'b-warn');
+    overall('warn', 'Gate de API key ativo');
+    detail.textContent = 'HTTP 401 — o gate X-Api-Key está ligado e esta página não envia a chave.';
+  } else {
+    set('d-wp', 'b-err', 'Erro ' + r.status); set('p-wp', 'b-err');
+    set('d-lic', 'b-warn', 'Verificar'); set('p-lic', 'b-warn');
+    set('d-lat', 'b-warn', r.ms + ' ms');
+    overall('err', 'Degradado');
+    detail.textContent = 'HTTP ' + r.status + ' · ' + (r.body || 'sem corpo');
+  }
+
+  document.getElementById('ts').textContent = 'Última checagem: ' + new Date().toLocaleString('pt-BR');
+  btn.disabled = false; btn.textContent = 'Testar agora';
+}
+
+let timer = null;
+function schedule() {
+  if (timer) clearInterval(timer);
+  if (document.getElementById('auto').checked) timer = setInterval(runChecks, 30000);
+}
+document.getElementById('auto').addEventListener('change', schedule);
+runChecks(); schedule();
+</script>
+</body>
+</html>

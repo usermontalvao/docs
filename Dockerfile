@@ -9,3 +9,6 @@ COPY --from=builder /usr/bin/caddy /usr/bin/caddy
 # Embute o Caddyfile na imagem (evita bind mount, que quebra no Portainer quando o
 # arquivo não está junto do compose). Editou o Caddyfile? Rebuild da imagem.
 COPY Caddyfile /etc/caddy/Caddyfile
+
+# Página de status servida na raiz (/ e /status). Editou? Rebuild da imagem.
+COPY status.html /srv/status.html

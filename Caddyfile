@@ -30,9 +30,10 @@
 	# EDITE com os domínios reais do seu CRM. Origin fora da lista -> "" -> sem CORS.
 	# (A Origin é sempre o domínio do CRM, não o domínio do túnel.)
 	map {header.Origin} {allowed_origin} {
+		https://jurius.com.br              "https://jurius.com.br"
+		https://www.jurius.com.br          "https://www.jurius.com.br"
 		https://crm-advogado.onrender.com  "https://crm-advogado.onrender.com"
-		https://app.seudominio.com.br      "https://app.seudominio.com.br"
-		# http://localhost:5173            "http://localhost:5173"   # p/ testar local
+		# http://localhost:5173            "http://localhost:5173"   # descomente p/ testar local
 		default                            ""
 	}
 	@allowed expression {allowed_origin} != ""
@@ -57,6 +58,17 @@
 			Vary "Origin"
 		}
 		respond 204
+	}
+
+	# --- Página de status (dashboard) na raiz --------------------------------
+	@status {
+		method GET
+		path / /status /status/
+	}
+	handle @status {
+		root * /srv
+		rewrite * /status.html
+		file_server
 	}
 
 	# --- Requisições reais (Import, etc.) ------------------------------------
