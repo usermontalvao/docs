@@ -21,7 +21,7 @@ Este serviço resolve os três pontos: confiável, seu, e com CORS restrito ao C
 |---|---|
 | `docker-compose.yml` | Sobe o `word-processor-server` + `caddy` (reverse proxy). |
 | `Dockerfile` | Compila o Caddy com o plugin de rate limit (`caddy-ratelimit`). |
-| `Caddyfile` | HTTPS automático + allowlist de CORS + rate limit + limite de upload + gate opcional por API key. |
+| `Caddyfile` | Escuta HTTP interno (modo túnel) + allowlist de CORS + rate limit + limite de upload + gate opcional por API key. |
 | `.env.server.example` | Modelo de variáveis (domínio, ACME, licença, API key opcional). Copie para `.env.server`. |
 | `.gitignore` | Impede comitar o `.env.server` (segredos). |
 | `DEPLOY.md` | Passo a passo completo (DNS, TLS, verificação, segurança, apontar o CRM). |
@@ -29,9 +29,10 @@ Este serviço resolve os três pontos: confiável, seu, e com CORS restrito ao C
 ## TL;DR
 
 ```bash
-cp .env.server.example .env.server   # e preencha
-docker compose up -d --build         # --build compila o Caddy com rate limit
-# aponte VITE_SYNC_FUSION do CRM para https://SEU_DOMINIO/api/documenteditor/
+cp .env.server.example .env.server            # e preencha a licença
+docker compose up -d --build                  # --build compila o Caddy com rate limit
+cloudflared tunnel --url http://localhost:42811   # (ou ngrok http 42811)
+# aponte VITE_SYNC_FUSION do CRM para https://SUA-URL-DO-TUNEL/api/documenteditor/
 ```
 
 Detalhes e checklist: **[DEPLOY.md](./DEPLOY.md)**.

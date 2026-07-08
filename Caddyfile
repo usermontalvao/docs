@@ -1,18 +1,22 @@
-# Reverse proxy do serviço de conversão Syncfusion.
-# - HTTPS automático (Let's Encrypt) para {$DOCX_DOMAIN}
-# - CORS restrito a uma allowlist (só reflete Origins conhecidas)
-# - Rate limit por IP + limite de tamanho de upload (protege o endpoint aberto)
-# - Gate OPCIONAL por X-Api-Key (comentado; ligue quando quiser)
+# Reverse proxy do serviço de conversão Syncfusion — MODO TÚNEL.
 #
-# {$DOCX_DOMAIN}, {$ACME_EMAIL} e {$DOCX_API_KEY} vêm do .env.server (env_file no compose).
+# Aqui o Caddy NÃO faz HTTPS: quem termina o TLS público é o túnel
+# (Cloudflare Tunnel / ngrok / etc.). O Caddy só escuta HTTP numa porta interna
+# fixa (:8080) e o docker-compose publica uma porta ALEATÓRIA no localhost, para
+# a qual o túnel aponta. Nada de portas 80/443 nem Let's Encrypt.
+#
+# O Caddy continua útil por: CORS restrito, rate limit, limite de upload e por
+# remover CORS duplicado do container.
 
 {
-	email {$ACME_EMAIL}
+	# Sem certificado próprio — o túnel cuida do HTTPS público.
+	auto_https off
 	# Necessário para o plugin caddy-ratelimit ter ordem definida no pipeline.
 	order rate_limit before basicauth
 }
 
-{$DOCX_DOMAIN} {
+# Escuta HTTP na porta interna 8080 (o compose mapeia a porta aleatória do host -> 8080).
+:8080 {
 	log
 
 	# Headers de segurança em todas as respostas.
@@ -24,6 +28,7 @@
 
 	# --- Allowlist de CORS ---------------------------------------------------
 	# EDITE com os domínios reais do seu CRM. Origin fora da lista -> "" -> sem CORS.
+	# (A Origin é sempre o domínio do CRM, não o domínio do túnel.)
 	map {header.Origin} {allowed_origin} {
 		https://crm-advogado.onrender.com  "https://crm-advogado.onrender.com"
 		https://app.seudominio.com.br      "https://app.seudominio.com.br"
@@ -33,10 +38,9 @@
 	@allowed expression {allowed_origin} != ""
 
 	# --- (OPCIONAL) Gate por API key -----------------------------------------
-	# Enquanto DOCX_API_KEY estiver vazio no .env.server, este gate fica INATIVO
-	# (não quebra o editor). Ao definir a chave, descomente as 3 linhas abaixo E
-	# faça o frontend enviar o header X-Api-Key (veja DEPLOY.md > Segurança).
-	# OPTIONS (preflight) é isento porque browsers não mandam headers custom nele.
+	# Enquanto DOCX_API_KEY estiver vazio no .env.server, este gate fica INATIVO.
+	# Ao definir a chave, descomente E faça o frontend enviar o header X-Api-Key
+	# (veja DEPLOY.md > Segurança). OPTIONS é isento (preflight não manda headers custom).
 	# @unauthorized expression `"{$DOCX_API_KEY}" != "" && {http.request.method} != "OPTIONS" && {http.request.header.X-Api-Key} != "{$DOCX_API_KEY}"`
 	# handle @unauthorized {
 	# 	respond "Unauthorized" 401
@@ -57,11 +61,16 @@
 
 	# --- Requisições reais (Import, etc.) ------------------------------------
 	handle {
-		# Rate limit por IP de origem. 120 req/min é folgado p/ um escritório
-		# atrás de um único IP (NAT) e ainda corta abuso. Ajuste se precisar.
+		# Rate limit por IP do cliente. ATENÇÃO: atrás de túnel, {remote_host} é
+		# sempre o IP do túnel (127.0.0.1), o que limitaria TODO MUNDO junto.
+		# Por isso usamos o IP real que o túnel encaminha no header:
+		#   - Cloudflare Tunnel: troque para {http.request.header.Cf-Connecting-Ip}
+		#   - ngrok / genérico:  {http.request.header.X-Forwarded-For}
+		# Se o seu túnel não encaminhar o IP do cliente, remova este bloco
+		# (senão vira um limite global de 120/min).
 		rate_limit {
 			zone docx_per_ip {
-				key {remote_host}
+				key {http.request.header.X-Forwarded-For}
 				events 120
 				window 1m
 			}
@@ -80,7 +89,6 @@
 		}
 
 		reverse_proxy word-processor-server:80 {
-			# Remove CORS que o container porventura mande (evita header duplicado).
 			header_down -Access-Control-Allow-Origin
 			header_down -Access-Control-Allow-Methods
 			header_down -Access-Control-Allow-Headers

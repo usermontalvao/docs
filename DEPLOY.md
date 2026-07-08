@@ -9,84 +9,104 @@ continua cuidando de auth, banco, storage e edge functions.
 
 ---
 
-## Arquitetura
+## Arquitetura (modo túnel)
 
 ```
 Browser do usuário (CRM no Render)
-        │  POST .../api/documenteditor/Import   (DOCX)
+        │  POST https://SEU-TUNEL/api/documenteditor/Import   (DOCX)
         ▼
- docx.seudominio.com  ──►  Caddy (HTTPS + CORS)  ──►  word-processor-server:80
-        ▲                                                     │
-        └──────────────  SFDT (JSON)  ◄───────────────────────┘
+   Túnel (Cloudflare/ngrok)  ← termina o HTTPS público
+        │  http://localhost:42811   (porta aleatória, só no host)
+        ▼
+   Caddy :8080  (CORS + rate limit + limite de upload)
+        ▼
+   word-processor-server:80   (conversor Syncfusion)
+        │
+        └──────  SFDT (JSON)  ──────►  volta pelo mesmo caminho
 ```
+
+O host **não** abre porta pública: o Caddy escuta só em `127.0.0.1:42811` e quem
+expõe pra internet (com HTTPS) é o túnel.
 
 ---
 
 ## Pré-requisitos
 
-- [ ] Um host Linux com IP público (VPS: Hetzner, DigitalOcean, Contabo, etc.). 1 vCPU / 1 GB RAM já roda.
-- [ ] Docker + Docker Compose plugin instalados (`docker --version`, `docker compose version`).
-- [ ] Portas **80** e **443** liberadas no firewall (necessárias para o TLS do Let's Encrypt).
+- [ ] Um host com Docker + Docker Compose (`docker --version`, `docker compose version`).
+      Pode ser uma VPS pequena OU até uma máquina sem IP público (é o caso do túnel).
+- [ ] Um túnel configurado: **Cloudflare Tunnel** (`cloudflared`) ou **ngrok**.
 - [ ] Uma licença Syncfusion que cubra o **Word Processor server-side** (Document Processing / DocIO).
+- [ ] Nenhuma porta 80/443 precisa ser aberta no firewall — o túnel faz a saída.
 
 ---
 
 ## Passo a passo
 
-### 1. DNS
-- [ ] Crie um registro **A** (e **AAAA** se tiver IPv6) para um subdomínio dedicado,
-      ex.: `docx.seudominio.com.br` → IP do host.
-- [ ] Confirme a propagação: `dig +short docx.seudominio.com.br` deve retornar o IP do host.
-
-### 2. Subir os arquivos no host
-- [ ] Copie a pasta `docx/` para o host (git clone do repo, `scp`, ou rsync).
+### 1. Subir os arquivos no host
+- [ ] Copie a pasta para o host (git clone, `scp` ou rsync).
 - [ ] Dentro dela:
       ```bash
       cp .env.server.example .env.server
-      nano .env.server        # preencha DOCX_DOMAIN, ACME_EMAIL e SYNCFUSION_LICENSE_KEY
+      nano .env.server        # preencha SYNCFUSION_LICENSE_KEY (DOCX_API_KEY é opcional)
       ```
 
-### 3. Ajustar CORS
+### 2. Ajustar CORS
 - [ ] Edite o `Caddyfile`, bloco `map {header.Origin} ...`, e deixe **apenas** os
-      domínios reais do seu CRM na allowlist (ex.: `https://crm-advogado.onrender.com`
-      e o domínio customizado, se houver).
+      domínios reais do seu CRM na allowlist (ex.: `https://crm-advogado.onrender.com`).
+      A Origin é sempre o domínio do CRM — **não** o domínio do túnel.
+
+### 3. (Opcional) Escolher outra porta aleatória
+- [ ] A porta do host é **42811** (em `docker-compose.yml`, `127.0.0.1:42811:8080`).
+      Para trocar, mude só o número da esquerda. A interna `:8080` não precisa mexer.
 
 ### 4. Subir os containers
 - [ ] ```bash
       docker compose up -d --build   # --build compila o Caddy com o plugin de rate limit
-      docker compose ps          # os dois containers devem estar "running"
-      docker compose logs -f caddy   # acompanhe a emissão do certificado TLS
+      docker compose ps              # os dois containers "running"
+      docker compose logs -f caddy
       ```
-- [ ] A primeira subida compila a imagem do Caddy (xcaddy) e emite o certificado — leva ~1-2 min.
 
-### 5. Verificar o serviço
-- [ ] TLS ok:
-      ```bash
-      curl -I https://docx.seudominio.com.br/api/documenteditor/
-      ```
-- [ ] Teste real de conversão (com um DOCX qualquer no host):
+### 5. Verificar localmente (antes do túnel)
+- [ ] Conversão real (com um DOCX qualquer no host):
       ```bash
       curl -s -o /dev/null -w "%{http_code}\n" \
-        -X POST https://docx.seudominio.com.br/api/documenteditor/Import \
+        -X POST http://localhost:42811/api/documenteditor/Import \
         -F "files=@teste.docx;type=application/vnd.openxmlformats-officedocument.wordprocessingml.document"
       ```
-      Esperado: **200**. Se vier a licença inválida, o corpo da resposta avisa.
-- [ ] Preflight/CORS ok (simulando o browser):
-      ```bash
-      curl -s -i -X OPTIONS https://docx.seudominio.com.br/api/documenteditor/Import \
-        -H "Origin: https://crm-advogado.onrender.com" \
-        -H "Access-Control-Request-Method: POST" | grep -i access-control
-      ```
-      Esperado: `Access-Control-Allow-Origin: https://crm-advogado.onrender.com`.
+      Esperado: **200**. Se a licença estiver inválida, o corpo avisa.
 
-### 6. Apontar o CRM para o novo servidor
+### 6. Ligar o túnel
+- **Cloudflare Tunnel** (recomendado — dá um subdomínio HTTPS estável):
+  ```bash
+  cloudflared tunnel --url http://localhost:42811
+  ```
+  ou, com túnel nomeado, no `config.yml`:
+  ```yaml
+  ingress:
+    - hostname: docx.seudominio.com.br
+      service: http://localhost:42811
+    - service: http_status:404
+  ```
+  > Para o rate limit por IP funcionar atrás do Cloudflare, troque no `Caddyfile`
+  > a `key` de `{http.request.header.X-Forwarded-For}` para `{http.request.header.Cf-Connecting-Ip}`.
+
+- **ngrok:**
+  ```bash
+  ngrok http 42811
+  ```
+- [ ] Anote a URL pública HTTPS que o túnel devolve (ex.: `https://docx.seudominio.com.br`
+      ou `https://xxxx.ngrok-free.app`).
+
+### 7. Apontar o CRM para o túnel
 - [ ] No `.env` do CRM (e nas envvars do Render), troque:
       ```
-      VITE_SYNC_FUSION=https://docx.seudominio.com.br/api/documenteditor/
+      VITE_SYNC_FUSION=https://SUA-URL-DO-TUNEL/api/documenteditor/
       ```
-      (repare que o caminho é `/api/documenteditor/`, **não** `/functions/v1/...`).
+      (caminho `/api/documenteditor/`, **não** `/functions/v1/...`).
+- [ ] Adicione a URL do túnel na allowlist de CORS? **Não precisa** — o CORS filtra a
+      Origin (domínio do CRM), não o destino.
 - [ ] **Redeploy** do frontend no Render (o Vite só lê env no build).
-- [ ] Abra o editor no CRM e teste abrir um DOCX (inclusive o `KIT CONSUMIDOR.docx`).
+- [ ] Abra o editor e teste abrir um DOCX (inclusive o `KIT CONSUMIDOR.docx`).
 
 ---
 
@@ -96,17 +116,20 @@ Browser do usuário (CRM no Render)
 - **Reiniciar:** `docker compose restart`
 - **Atualizar:** `docker compose build --pull && docker compose pull && docker compose up -d`
   (o Caddy é uma imagem custom com plugin de rate limit — precisa de `build`, não só `pull`).
-- **Parar:** `docker compose down` (mantém os certificados no volume `caddy_data`)
+- **Parar:** `docker compose down`
 - **Recursos:** limite inicial de 1 vCPU / 1 GB no compose; suba se sentir lentidão em DOCX grandes.
 
 ---
 
 ## Segurança
 
-O endpoint é público (o CORS só barra browsers de outros sites, não `curl`). As defesas
-que já vêm configuradas no `Caddyfile`:
+Em modo túnel o Caddy escuta só em `127.0.0.1` — o host **não** expõe porta pública, e o
+túnel (Cloudflare/ngrok) fica na frente com as proteções dele (DDoS, etc.). Além disso, o
+`Caddyfile` já traz:
 
-- **Rate limit por IP:** 120 req/min por IP (plugin `caddy-ratelimit`, compilado via `Dockerfile`).
+- **Rate limit por IP:** 120 req/min (plugin `caddy-ratelimit`, compilado via `Dockerfile`).
+  ⚠️ Atrás de túnel, o IP real vem num header encaminhado — ajuste a `key` do `rate_limit`
+  (`Cf-Connecting-Ip` p/ Cloudflare, `X-Forwarded-For` p/ ngrok), senão o limite vira global.
   Ajuste `events`/`window` no `Caddyfile` se um escritório grande atrás de um IP (NAT) esbarrar.
 - **Limite de upload:** 30 MB por requisição (`request_body max_size`) — evita estourar a memória do conversor.
 - **Headers de segurança:** `X-Content-Type-Options`, `Referrer-Policy`, remoção do header `Server`.

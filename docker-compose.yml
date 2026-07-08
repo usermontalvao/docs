@@ -49,14 +49,15 @@ services:
     container_name: docx-caddy
     restart: unless-stopped
     env_file:
-      - .env.server            # fornece DOCX_DOMAIN, ACME_EMAIL, DOCX_API_KEY (usados no Caddyfile)
+      - .env.server            # fornece DOCX_API_KEY (opcional, usado no Caddyfile)
     ports:
-      - "80:80"                # necessário para o desafio HTTP-01 do Let's Encrypt
-      - "443:443"
-      - "443:443/udp"          # HTTP/3
+      # MODO TÚNEL: publica só no localhost, numa porta ALEATÓRIA -> Caddy interno :8080.
+      # O túnel (Cloudflare/ngrok) aponta para http://localhost:42811.
+      # Trocar a porta aleatória? Mude só o número da esquerda (host).
+      - "127.0.0.1:42811:8080"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data       # certificados TLS persistidos
+      - caddy_data:/data       # estado interno do Caddy (não há mais cert TLS aqui)
       - caddy_config:/config
     depends_on:
       - word-processor-server
