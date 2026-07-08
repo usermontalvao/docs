@@ -2,7 +2,9 @@
 #
 # Este compose sobe DOIS containers:
 #   1) word-processor-server  -> o conversor oficial do Syncfusion (interno, porta 80)
-#   2) caddy                  -> reverse proxy com HTTPS automático + CORS restrito
+#   2) caddy                  -> reverse proxy (modo túnel): CORS restrito + rate limit +
+#                               allowlist de rotas/métodos + health endpoints. O HTTPS
+#                               público é do túnel (Cloudflare/ngrok), não do Caddy.
 #
 # O CRM (frontend estático) continua no Render. Só o Import de DOCX do editor
 # passa a bater aqui, em vez do endpoint demo público do Syncfusion.
@@ -19,6 +21,9 @@ services:
     image: syncfusion/word-processor-server:latest
     container_name: docx-word-processor
     restart: unless-stopped
+    # Endurecimento: impede escalada de privilégios dentro do container.
+    security_opt:
+      - no-new-privileges:true
     environment:
       # No Portainer: defina SYNCFUSION_LICENSE_KEY na aba "Environment variables" do stack.
       # No CLI: docker compose --env-file .env.server up -d --build
@@ -27,6 +32,12 @@ services:
       - "80"                   # só exposto na rede interna; quem publica é o Caddy
     networks:
       - docxnet
+    # Rotação de logs: sem isto o json-file cresce sem limite e enche o disco do host.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     deploy:
       resources:
         limits:
@@ -50,6 +61,9 @@ services:
     image: docx-caddy-ratelimit:local
     container_name: docx-caddy
     restart: unless-stopped
+    # Endurecimento: impede escalada de privilégios dentro do container.
+    security_opt:
+      - no-new-privileges:true
     environment:
       # Opcional: só usado se você ligar o gate por API key no Caddyfile.
       # Vazio = gate desligado. No Portainer, defina na aba "Environment variables".
@@ -64,9 +78,26 @@ services:
       - caddy_data:/data       # estado interno do Caddy (não há mais cert TLS aqui)
       - caddy_config:/config
     depends_on:
-      - word-processor-server
+      word-processor-server:
+        condition: service_healthy
     networks:
       - docxnet
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128m
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health/live >/dev/null 2>&1 || curl -fsS http://localhost:8080/health/live >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
 networks:
   docxnet:

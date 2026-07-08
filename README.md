@@ -21,10 +21,11 @@ Este serviço resolve os três pontos: confiável, seu, e com CORS restrito ao C
 |---|---|
 | `docker-compose.yml` | Sobe o `word-processor-server` + `caddy` (reverse proxy). |
 | `Dockerfile` | Compila o Caddy com o plugin de rate limit (`caddy-ratelimit`). |
-| `Caddyfile` | Escuta HTTP interno (modo túnel) + allowlist de CORS + rate limit + limite de upload + gate opcional por API key. |
-| `.env.server.example` | Modelo de variáveis (domínio, ACME, licença, API key opcional). Copie para `.env.server`. |
+| `Caddyfile` | Escuta HTTP interno (modo túnel) + allowlist de CORS + respostas explícitas para origin bloqueada + allowlist de rotas/métodos + health/live e health/ready + rate limit + limite de upload + gate opcional por API key (auto-ativa) + headers de segurança + logs JSON. |
+| `.env.server.example` | Modelo de variáveis (licença, API key opcional). Copie para `.env.server`. |
+| `smoke-test.sh` | Checagens locais (health, rotas, métodos, CORS, gate de API key e conversão real). Rode após `up -d`. |
 | `.gitignore` | Impede comitar o `.env.server` (segredos). |
-| `DEPLOY.md` | Passo a passo completo (DNS, TLS, verificação, segurança, apontar o CRM). |
+| `DEPLOY.md` | Passo a passo completo (túnel, verificação, segurança, smoke test, troubleshooting, apontar o CRM). |
 
 ## TL;DR
 

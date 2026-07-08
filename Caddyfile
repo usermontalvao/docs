@@ -5,25 +5,87 @@
 # fixa (:8080) e o docker-compose publica uma porta ALEATÓRIA no localhost, para
 # a qual o túnel aponta. Nada de portas 80/443 nem Let's Encrypt.
 #
-# O Caddy continua útil por: CORS restrito, rate limit, limite de upload e por
-# remover CORS duplicado do container.
+# O Caddy é a camada de segurança operacional do serviço:
+#   - CORS restrito por allowlist de Origin (respostas explícitas quando bloqueado)
+#   - rate limit por IP
+#   - limite de tamanho de upload
+#   - allowlist de ROTAS (tudo fora de /api/documenteditor/*, /health/* e /status -> 404)
+#   - allowlist de MÉTODOS (fora de GET/POST/OPTIONS -> 405)
+#   - gate opcional por X-Api-Key (auto-ativa quando DOCX_API_KEY é definido)
+#   - headers de segurança e remoção de headers que vazam stack
+#   - logs de acesso estruturados (JSON) para diagnóstico
 
 {
 	# Sem certificado próprio — o túnel cuida do HTTPS público.
 	auto_https off
+	# O túnel conecta de um IP privado (127.0.0.1 / rede docker). Marcá-lo como
+	# proxy confiável faz o Caddy respeitar o X-Forwarded-For que o túnel encaminha
+	# (usado como chave do rate limit) e não confiar em headers forjados de fora.
+	servers {
+		trusted_proxies static private_ranges
+	}
 	# Necessário para o plugin caddy-ratelimit ter ordem definida no pipeline.
 	order rate_limit before basicauth
 }
 
 # Escuta HTTP na porta interna 8080 (o compose mapeia a porta aleatória do host -> 8080).
 :8080 {
-	log
+	# --- Logs de acesso estruturados (JSON) ----------------------------------
+	# Vão para stdout -> visíveis em `docker compose logs -f caddy`.
+	# Ajuste level para DEBUG se precisar investigar roteamento.
+	log {
+		output stdout
+		format json
+		level INFO
+	}
 
-	# Headers de segurança em todas as respostas.
+	# Headers de segurança em TODAS as respostas.
 	header {
 		-Server
+		-X-Powered-By
 		X-Content-Type-Options "nosniff"
 		Referrer-Policy "no-referrer"
+		X-Frame-Options "DENY"
+	}
+
+	# --- Health endpoints ----------------------------------------------------
+	# liveness: o proxy está de pé e aceitando requests (não toca no upstream).
+	@health_live path /health /health/live
+	handle @health_live {
+		header Content-Type "application/json; charset=utf-8"
+		header Cache-Control "no-store"
+		respond `{"status":"ok","service":"caddy","mode":"live"}` 200
+	}
+
+	# readiness: o proxy consegue alcançar o conversor upstream.
+	# Faz um GET real no Word Processor; se ele responder, o serviço está pronto.
+	# Upstream fora do ar -> reverse_proxy devolve 502 -> readiness "não pronto".
+	@health_ready path /health/ready
+	handle @health_ready {
+		header Cache-Control "no-store"
+		rewrite * /api/documenteditor/
+		reverse_proxy word-processor-server:80 {
+			header_down -Access-Control-Allow-Origin
+			header_down -Access-Control-Allow-Methods
+			header_down -Access-Control-Allow-Headers
+			# Não deixa a readiness travar por muito tempo se o upstream pendurar.
+			transport http {
+				dial_timeout 3s
+				response_header_timeout 5s
+			}
+		}
+	}
+
+	# --- Página de status (dashboard) na raiz --------------------------------
+	@status {
+		method GET
+		path / /status /status/
+	}
+	handle @status {
+		header Content-Security-Policy "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'"
+		root * /srv
+		rewrite * /status.html
+		file_server
 	}
 
 	# --- Allowlist de CORS ---------------------------------------------------
@@ -35,21 +97,57 @@
 		https://crm-advogado.onrender.com  "https://crm-advogado.onrender.com"
 		http://localhost:3000              "http://localhost:3000"
 		# http://localhost:5173            "http://localhost:5173"   # use se o CRM local rodar no Vite padrão
+		# O próprio domínio do túnel: a página /status faz uma sonda POST same-origin,
+		# que o browser marca com esta Origin. Sem ela, o dashboard tomaria 403.
+		# Ajuste para o hostname real do seu túnel.
+		https://docs.jurius-api.com        "https://docs.jurius-api.com"
 		default                            ""
 	}
 	@allowed expression {allowed_origin} != ""
+	@preflight_denied expression {http.request.method} == "OPTIONS" && {header.Origin} != "" && {allowed_origin} == ""
+	@cors_denied expression {http.request.method} != "OPTIONS" && {header.Origin} != "" && {allowed_origin} == ""
 
-	# --- (OPCIONAL) Gate por API key -----------------------------------------
-	# Enquanto DOCX_API_KEY estiver vazio no .env.server, este gate fica INATIVO.
-	# Ao definir a chave, descomente E faça o frontend enviar o header X-Api-Key
-	# (veja DEPLOY.md > Segurança). OPTIONS é isento (preflight não manda headers custom).
-	# @unauthorized expression `"{$DOCX_API_KEY}" != "" && {http.request.method} != "OPTIONS" && {http.request.header.X-Api-Key} != "{$DOCX_API_KEY}"`
-	# handle @unauthorized {
-	# 	respond "Unauthorized" 401
-	# }
+	# --- Gate por API key (auto-ativa quando DOCX_API_KEY é definido) ---------
+	# {$DOCX_API_KEY} é expandido no build da imagem. Se vier vazio, a 1ª condição
+	# ("" != "") é falsa e o gate fica INATIVO — nada quebra. Ao definir a chave
+	# no ambiente e rebuildar, o gate passa a exigir o header X-Api-Key nas
+	# requisições à API (OPTIONS/preflight fica isento; a página de status e os
+	# health endpoints são tratados ANTES e não passam por aqui).
+	# Frontend: enviar header X-Api-Key (ver DEPLOY.md > Segurança).
+	@unauthorized {
+		path /api/documenteditor/*
+		expression `"{$DOCX_API_KEY}" != "" && {http.request.method} != "OPTIONS" && {http.request.header.X-Api-Key} != "{$DOCX_API_KEY}"`
+	}
+	handle @unauthorized {
+		header Content-Type "application/json; charset=utf-8"
+		respond `{"error":"unauthorized","hint":"Requisição sem X-Api-Key válido. Veja DEPLOY.md > Segurança."}` 401
+	}
 
-	# --- Preflight (OPTIONS) -------------------------------------------------
-	@preflight method OPTIONS
+	# --- Allowlist de MÉTODOS na API -----------------------------------------
+	# O conversor só precisa de GET (metadados) e POST (Import/Save). Qualquer
+	# outro método (PUT/DELETE/PATCH/etc.) é rejeitado com 405.
+	@bad_method {
+		path /api/documenteditor/*
+		expression `{http.request.method} != "GET" && {http.request.method} != "POST" && {http.request.method} != "OPTIONS"`
+	}
+	handle @bad_method {
+		header Content-Type "application/json; charset=utf-8"
+		header Allow "GET, POST, OPTIONS"
+		respond `{"error":"method not allowed","hint":"Somente GET, POST e OPTIONS."}` 405
+	}
+
+	# --- Preflight (OPTIONS) com origin bloqueada ----------------------------
+	handle @preflight_denied {
+		header Content-Type "application/json; charset=utf-8"
+		header Vary "Origin"
+		respond `{"error":"CORS origin not allowed","hint":"Adicione a origin do CRM no bloco map {header.Origin} do Caddyfile."}` 403
+	}
+
+	# --- Preflight (OPTIONS) com origin permitida ----------------------------
+	@preflight {
+		method OPTIONS
+		path /api/documenteditor/*
+	}
 	handle @preflight {
 		header @allowed {
 			Access-Control-Allow-Origin "{allowed_origin}"
@@ -61,19 +159,16 @@
 		respond 204
 	}
 
-	# --- Página de status (dashboard) na raiz --------------------------------
-	@status {
-		method GET
-		path / /status /status/
-	}
-	handle @status {
-		root * /srv
-		rewrite * /status.html
-		file_server
+	# --- Requisição real com origin bloqueada --------------------------------
+	handle @cors_denied {
+		header Content-Type "application/json; charset=utf-8"
+		header Vary "Origin"
+		respond `{"error":"CORS origin not allowed","hint":"Adicione a origin do CRM no bloco map {header.Origin} do Caddyfile."}` 403
 	}
 
-	# --- Requisições reais (Import, etc.) ------------------------------------
-	handle {
+	# --- Requisições reais à API (Import, etc.) ------------------------------
+	@api path /api/documenteditor/*
+	handle @api {
 		# Rate limit por IP do cliente. ATENÇÃO: atrás de túnel, {remote_host} é
 		# sempre o IP do túnel (127.0.0.1), o que limitaria TODO MUNDO junto.
 		# Por isso usamos o IP real que o túnel encaminha no header:
@@ -112,5 +207,12 @@
 				write_timeout 120s
 			}
 		}
+	}
+
+	# --- Tudo o mais: rota não permitida -------------------------------------
+	# Bloqueia qualquer caminho fora da allowlist (ex.: /admin, /.env, scanners).
+	handle {
+		header Content-Type "application/json; charset=utf-8"
+		respond `{"error":"not found"}` 404
 	}
 }

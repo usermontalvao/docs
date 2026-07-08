@@ -87,6 +87,16 @@ expõe pra internet (com HTTPS) é o túnel.
       ```
 
 ### 5. Verificar localmente (antes do túnel)
+- [ ] Liveness do proxy:
+      ```bash
+      curl -i http://localhost:42811/health/live
+      ```
+      Esperado: **200** com JSON simples.
+- [ ] Readiness do proxy + upstream:
+      ```bash
+      curl -i http://localhost:42811/health/ready
+      ```
+      Esperado: **200** enquanto o Word Processor estiver acessível.
 - [ ] Conversão real (com um DOCX qualquer no host):
       ```bash
       curl -s -o /dev/null -w "%{http_code}\n" \
@@ -133,6 +143,7 @@ expõe pra internet (com HTTPS) é o túnel.
 ## Operação
 
 - **Logs:** `docker compose logs -f word-processor-server`
+- **Health:** `curl http://localhost:42811/health/live` e `curl http://localhost:42811/health/ready`
 - **Reiniciar:** `docker compose restart`
 - **Atualizar (CLI):** `docker compose --env-file .env.server up -d --build --pull always`
   (o Caddy é imagem custom com plugin de rate limit — precisa de `build`, não só `pull`).
@@ -163,15 +174,60 @@ As defesas reais são o rate limit e o limite de tamanho acima.
 
 Para ligar:
 
-1. Defina `DOCX_API_KEY=<uma-chave-aleatoria>` no `.env.server`.
-2. No `Caddyfile`, descomente o bloco `@unauthorized` / `handle @unauthorized`.
+1. Defina `DOCX_API_KEY=<uma-chave-aleatoria>` no `.env.server` (ou na aba de env do Portainer).
+2. **Rebuild** da imagem do Caddy — o gate **auto-ativa** quando a chave não está vazia
+   (não precisa mais editar o Caddyfile; o bloco `@unauthorized` já vive no arquivo e se
+   liga sozinho). O valor é embutido na imagem no build, então trocar a chave exige rebuild.
 3. No frontend (repo `CRMlaw`), faça o editor enviar o header. Já existe o gancho
    `beforeXmlHttpRequestSend` em `src/components/SyncfusionEditor.tsx`; adicione uma env
    `VITE_DOCX_API_KEY` e injete `{ 'X-Api-Key': import.meta.env.VITE_DOCX_API_KEY }` junto
    dos headers quando o `serviceUrl` apontar para o servidor docx.
-4. `docker compose up -d` para recarregar o Caddy.
+4. `docker compose --env-file .env.server up -d --build` para recompilar e recarregar o Caddy.
+
+Verifique com o smoke test: `DOCX_API_KEY=sua-chave ./smoke-test.sh` deve mostrar
+`sem X-Api-Key -> 401` como **PASS**.
 
 Se `DOCX_API_KEY` ficar vazio, o gate permanece **inativo** e nada quebra.
+OPTIONS (preflight), a página de status e os health endpoints **nunca** exigem a chave.
+
+---
+
+## Smoke test local
+
+Depois de `docker compose up -d` (e antes de mexer no túnel), rode o script de checagem.
+Ele valida health/live, health/ready, a página de status, a allowlist de rotas e métodos,
+as respostas de CORS bloqueado, o gate de API key (se ligado) e uma conversão real:
+
+```bash
+# Git Bash (Windows) ou shell do host Linux. Requer curl + base64.
+./smoke-test.sh                                 # usa http://localhost:42811
+BASE_URL=http://localhost:42811 ./smoke-test.sh # outra porta
+DOCX_API_KEY=sua-chave ./smoke-test.sh          # também testa o gate de API key
+```
+
+Saída esperada: todas as linhas `[PASS]` e `Resultado: N ok / 0 falhas` (exit 0).
+Qualquer `[FAIL]` aponta o que quebrou (ex.: conversão sem SFDT = licença inválida).
+
+---
+
+## Troubleshooting
+
+| Sintoma | Causa provável | O que fazer |
+|---|---|---|
+| `health/live` responde, `health/ready` dá **502** | Word Processor caiu ou ainda subindo | `docker compose ps`; `docker compose logs word-processor-server`; aguarde o `start_period` (45s) |
+| Conversão volta **200** mas sem `sfdt` no corpo | Licença Syncfusion ausente/inválida ou não cobre server-side | Confira `SYNCFUSION_LICENSE_KEY`; precisa cobrir **Document Processing / DocIO** |
+| Editor do CRM: erro de **CORS** no console (mas curl dá 200) | Origin do CRM fora da allowlist | Adicione a Origin exata no bloco `map {header.Origin}` do Caddyfile e **rebuild** |
+| Tudo volta **403 CORS origin not allowed** | Origin não bate (http vs https, com/sem `www`, porta) | A Origin é o domínio do **CRM**, não o do túnel; copie exatamente do DevTools |
+| Requisições legítimas tomando **429** | Rate limit global porque a `key` não reflete o IP real | Ajuste a `key` do `rate_limit` (`Cf-Connecting-Ip` p/ Cloudflare, `X-Forwarded-For` p/ ngrok) |
+| **401** inesperado na API | `DOCX_API_KEY` foi definida e o gate ativou | Envie `X-Api-Key` no frontend, ou esvazie a chave e rebuilde |
+| DOCX grande falha/timeout | Passou do teto de upload ou do timeout | Suba `request_body max_size` e/ou `read_timeout`/`write_timeout` no Caddyfile |
+| Alterou o Caddyfile e "não mudou nada" | Caddyfile é **embutido na imagem** (COPY) | Rebuild obrigatório: `docker compose up -d --build` |
+| **404** em rotas que antes passavam | Allowlist de rotas: só `/api/documenteditor/*`, `/health/*`, `/status` | Use o caminho `/api/documenteditor/...`; outros são bloqueados de propósito |
+
+Ver logs de acesso estruturados (JSON) do Caddy para diagnóstico fino:
+```bash
+docker compose logs -f caddy      # cada request vira uma linha JSON (status, método, path, duração)
+```
 
 ---
 

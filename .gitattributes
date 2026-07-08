@@ -1,2 +1,7 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Shell scripts e o Caddyfile PRECISAM de LF mesmo checkout no Windows
+# (CRLF quebra o shebang no host Linux e a leitura do Caddyfile).
+*.sh text eol=lf
+Caddyfile text eol=lf
