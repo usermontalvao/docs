@@ -1,40 +1,54 @@
 # Reverse proxy do serviço de conversão Syncfusion.
-# - HTTPS automático (Let's Encrypt) para o domínio em {$DOCX_DOMAIN}
-# - CORS restrito: só reflete a Origin se ela estiver na allowlist abaixo
-# - Remove qualquer header CORS que o container mande, para nunca duplicar
+# - HTTPS automático (Let's Encrypt) para {$DOCX_DOMAIN}
+# - CORS restrito a uma allowlist (só reflete Origins conhecidas)
+# - Rate limit por IP + limite de tamanho de upload (protege o endpoint aberto)
+# - Gate OPCIONAL por X-Api-Key (comentado; ligue quando quiser)
 #
-# As variáveis {$DOCX_DOMAIN} e {$ACME_EMAIL} vêm do .env.server (via env_file no compose).
+# {$DOCX_DOMAIN}, {$ACME_EMAIL} e {$DOCX_API_KEY} vêm do .env.server (env_file no compose).
 
 {
-	# E-mail usado pelo Let's Encrypt para avisos de expiração de certificado.
 	email {$ACME_EMAIL}
+	# Necessário para o plugin caddy-ratelimit ter ordem definida no pipeline.
+	order rate_limit before basicauth
 }
 
 {$DOCX_DOMAIN} {
 	log
 
+	# Headers de segurança em todas as respostas.
+	header {
+		-Server
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+	}
+
 	# --- Allowlist de CORS ---------------------------------------------------
-	# Mapeia a Origin recebida para o valor permitido. EDITE as linhas abaixo
-	# com os domínios reais do seu CRM. Qualquer Origin fora da lista cai no
-	# "default" (string vazia) e NÃO recebe header CORS -> o browser bloqueia.
+	# EDITE com os domínios reais do seu CRM. Origin fora da lista -> "" -> sem CORS.
 	map {header.Origin} {allowed_origin} {
 		https://crm-advogado.onrender.com  "https://crm-advogado.onrender.com"
 		https://app.seudominio.com.br      "https://app.seudominio.com.br"
-		# http://localhost:5173            "http://localhost:5173"   # descomente p/ testar local
+		# http://localhost:5173            "http://localhost:5173"   # p/ testar local
 		default                            ""
 	}
-
-	# Só aplica CORS quando a Origin foi reconhecida na allowlist.
 	@allowed expression {allowed_origin} != ""
 
+	# --- (OPCIONAL) Gate por API key -----------------------------------------
+	# Enquanto DOCX_API_KEY estiver vazio no .env.server, este gate fica INATIVO
+	# (não quebra o editor). Ao definir a chave, descomente as 3 linhas abaixo E
+	# faça o frontend enviar o header X-Api-Key (veja DEPLOY.md > Segurança).
+	# OPTIONS (preflight) é isento porque browsers não mandam headers custom nele.
+	# @unauthorized expression `"{$DOCX_API_KEY}" != "" && {http.request.method} != "OPTIONS" && {http.request.header.X-Api-Key} != "{$DOCX_API_KEY}"`
+	# handle @unauthorized {
+	# 	respond "Unauthorized" 401
+	# }
+
 	# --- Preflight (OPTIONS) -------------------------------------------------
-	# Responde direto no proxy, sem encaminhar ao container.
 	@preflight method OPTIONS
 	handle @preflight {
 		header @allowed {
 			Access-Control-Allow-Origin "{allowed_origin}"
 			Access-Control-Allow-Methods "GET, POST, OPTIONS"
-			Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With"
+			Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With, X-Api-Key"
 			Access-Control-Max-Age "86400"
 			Vary "Origin"
 		}
@@ -43,21 +57,35 @@
 
 	# --- Requisições reais (Import, etc.) ------------------------------------
 	handle {
+		# Rate limit por IP de origem. 120 req/min é folgado p/ um escritório
+		# atrás de um único IP (NAT) e ainda corta abuso. Ajuste se precisar.
+		rate_limit {
+			zone docx_per_ip {
+				key {remote_host}
+				events 120
+				window 1m
+			}
+		}
+
+		# Teto de tamanho do DOCX enviado (evita estourar memória do conversor).
+		request_body {
+			max_size 30MB
+		}
+
 		header @allowed {
 			Access-Control-Allow-Origin "{allowed_origin}"
 			Access-Control-Allow-Methods "GET, POST, OPTIONS"
-			Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With"
+			Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With, X-Api-Key"
 			Vary "Origin"
 		}
 
 		reverse_proxy word-processor-server:80 {
-			# Se o próprio container já mandar CORS, remove aqui para não duplicar
-			# (dois Access-Control-Allow-Origin fazem o browser rejeitar a resposta).
+			# Remove CORS que o container porventura mande (evita header duplicado).
 			header_down -Access-Control-Allow-Origin
 			header_down -Access-Control-Allow-Methods
 			header_down -Access-Control-Allow-Headers
 
-			# Uploads de DOCX podem demorar em arquivos grandes.
+			# DOCX grandes podem demorar.
 			transport http {
 				read_timeout 120s
 				write_timeout 120s

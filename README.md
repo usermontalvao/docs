@@ -20,16 +20,17 @@ Este serviço resolve os três pontos: confiável, seu, e com CORS restrito ao C
 | Arquivo | O que é |
 |---|---|
 | `docker-compose.yml` | Sobe o `word-processor-server` + `caddy` (reverse proxy). |
-| `Caddyfile` | HTTPS automático + allowlist de CORS. |
-| `.env.server.example` | Modelo de variáveis (domínio, e-mail ACME, licença). Copie para `.env.server`. |
+| `Dockerfile` | Compila o Caddy com o plugin de rate limit (`caddy-ratelimit`). |
+| `Caddyfile` | HTTPS automático + allowlist de CORS + rate limit + limite de upload + gate opcional por API key. |
+| `.env.server.example` | Modelo de variáveis (domínio, ACME, licença, API key opcional). Copie para `.env.server`. |
 | `.gitignore` | Impede comitar o `.env.server` (segredos). |
-| `DEPLOY.md` | Passo a passo completo (DNS, TLS, verificação, apontar o CRM). |
+| `DEPLOY.md` | Passo a passo completo (DNS, TLS, verificação, segurança, apontar o CRM). |
 
 ## TL;DR
 
 ```bash
 cp .env.server.example .env.server   # e preencha
-docker compose up -d
+docker compose up -d --build         # --build compila o Caddy com rate limit
 # aponte VITE_SYNC_FUSION do CRM para https://SEU_DOMINIO/api/documenteditor/
 ```
 

@@ -53,11 +53,11 @@ Browser do usuário (CRM no Render)
 
 ### 4. Subir os containers
 - [ ] ```bash
-      docker compose up -d
+      docker compose up -d --build   # --build compila o Caddy com o plugin de rate limit
       docker compose ps          # os dois containers devem estar "running"
       docker compose logs -f caddy   # acompanhe a emissão do certificado TLS
       ```
-- [ ] A primeira subida do Caddy leva alguns segundos para obter o certificado.
+- [ ] A primeira subida compila a imagem do Caddy (xcaddy) e emite o certificado — leva ~1-2 min.
 
 ### 5. Verificar o serviço
 - [ ] TLS ok:
@@ -94,9 +94,40 @@ Browser do usuário (CRM no Render)
 
 - **Logs:** `docker compose logs -f word-processor-server`
 - **Reiniciar:** `docker compose restart`
-- **Atualizar imagem:** `docker compose pull && docker compose up -d`
+- **Atualizar:** `docker compose build --pull && docker compose pull && docker compose up -d`
+  (o Caddy é uma imagem custom com plugin de rate limit — precisa de `build`, não só `pull`).
 - **Parar:** `docker compose down` (mantém os certificados no volume `caddy_data`)
 - **Recursos:** limite inicial de 1 vCPU / 1 GB no compose; suba se sentir lentidão em DOCX grandes.
+
+---
+
+## Segurança
+
+O endpoint é público (o CORS só barra browsers de outros sites, não `curl`). As defesas
+que já vêm configuradas no `Caddyfile`:
+
+- **Rate limit por IP:** 120 req/min por IP (plugin `caddy-ratelimit`, compilado via `Dockerfile`).
+  Ajuste `events`/`window` no `Caddyfile` se um escritório grande atrás de um IP (NAT) esbarrar.
+- **Limite de upload:** 30 MB por requisição (`request_body max_size`) — evita estourar a memória do conversor.
+- **Headers de segurança:** `X-Content-Type-Options`, `Referrer-Policy`, remoção do header `Server`.
+
+### (Opcional) Exigir X-Api-Key
+
+Camada extra contra abuso casual. **Limitação honesta:** como o CRM é um SPA, a chave vai no
+bundle do navegador e é legível — não protege contra atacante dedicado, só corta script bobo.
+As defesas reais são o rate limit e o limite de tamanho acima.
+
+Para ligar:
+
+1. Defina `DOCX_API_KEY=<uma-chave-aleatoria>` no `.env.server`.
+2. No `Caddyfile`, descomente o bloco `@unauthorized` / `handle @unauthorized`.
+3. No frontend (repo `CRMlaw`), faça o editor enviar o header. Já existe o gancho
+   `beforeXmlHttpRequestSend` em `src/components/SyncfusionEditor.tsx`; adicione uma env
+   `VITE_DOCX_API_KEY` e injete `{ 'X-Api-Key': import.meta.env.VITE_DOCX_API_KEY }` junto
+   dos headers quando o `serviceUrl` apontar para o servidor docx.
+4. `docker compose up -d` para recarregar o Caddy.
+
+Se `DOCX_API_KEY` ficar vazio, o gate permanece **inativo** e nada quebra.
 
 ---
 
