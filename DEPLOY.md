@@ -68,6 +68,9 @@ expõe pra internet (com HTTPS) é o túnel.
 - [ ] Edite o `Caddyfile`, bloco `map {header.Origin} ...`, e deixe **apenas** os
       domínios reais do seu CRM na allowlist (ex.: `https://crm-advogado.onrender.com`).
       A Origin é sempre o domínio do CRM — **não** o domínio do túnel.
+- [ ] Se você também roda o CRM localmente, inclua a origem local exata usada no navegador
+      (ex.: `http://localhost:3000` ou `http://localhost:5173`). Sem isso, o conversor pode
+      até responder `200`, mas o browser bloqueia a leitura por CORS.
 - [ ] O Caddyfile é **embutido na imagem** (COPY no `Dockerfile`), então qualquer edição
       nele exige **rebuild** (`docker compose ... up -d --build`). Não há bind mount.
 
