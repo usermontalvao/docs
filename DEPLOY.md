@@ -42,7 +42,17 @@ expõe pra internet (com HTTPS) é o túnel.
 
 ## Passo a passo
 
-### 1. Subir os arquivos no host
+> ### Usando Portainer?
+> - Deploy como **stack de "Git repository"** apontando para o repositório desta pasta
+>   (`docs`). NÃO cole só o conteúdo do compose — ele precisa dos arquivos `Dockerfile`
+>   e `Caddyfile` no mesmo diretório (`build: .` e mount `./Caddyfile`).
+> - As variáveis vão na aba **"Environment variables"** do stack (não em `.env.server`):
+>   - `SYNCFUSION_LICENSE_KEY` = sua licença
+>   - `DOCX_API_KEY` = deixe vazio (ou uma chave, se for ligar o gate)
+> - Marque a opção de build/"pull and redeploy" para o Portainer compilar o `Dockerfile`.
+> - Pule os passos 1 e 4 abaixo (que são a via CLI) — o resto (CORS, porta, túnel) vale igual.
+
+### 1. Subir os arquivos no host (via CLI)
 - [ ] Copie a pasta para o host (git clone, `scp` ou rsync).
 - [ ] Dentro dela:
       ```bash
@@ -59,9 +69,10 @@ expõe pra internet (com HTTPS) é o túnel.
 - [ ] A porta do host é **42811** (em `docker-compose.yml`, `127.0.0.1:42811:8080`).
       Para trocar, mude só o número da esquerda. A interna `:8080` não precisa mexer.
 
-### 4. Subir os containers
+### 4. Subir os containers (via CLI)
 - [ ] ```bash
-      docker compose up -d --build   # --build compila o Caddy com o plugin de rate limit
+      # --env-file lê SYNCFUSION_LICENSE_KEY/DOCX_API_KEY; --build compila o Caddy com rate limit
+      docker compose --env-file .env.server up -d --build
       docker compose ps              # os dois containers "running"
       docker compose logs -f caddy
       ```
@@ -114,8 +125,9 @@ expõe pra internet (com HTTPS) é o túnel.
 
 - **Logs:** `docker compose logs -f word-processor-server`
 - **Reiniciar:** `docker compose restart`
-- **Atualizar:** `docker compose build --pull && docker compose pull && docker compose up -d`
-  (o Caddy é uma imagem custom com plugin de rate limit — precisa de `build`, não só `pull`).
+- **Atualizar (CLI):** `docker compose --env-file .env.server up -d --build --pull always`
+  (o Caddy é imagem custom com plugin de rate limit — precisa de `build`, não só `pull`).
+  No Portainer: use "Pull and redeploy" / "Update the stack" com rebuild.
 - **Parar:** `docker compose down`
 - **Recursos:** limite inicial de 1 vCPU / 1 GB no compose; suba se sentir lentidão em DOCX grandes.
 

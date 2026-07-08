@@ -19,8 +19,10 @@ services:
     image: syncfusion/word-processor-server:latest
     container_name: docx-word-processor
     restart: unless-stopped
-    env_file:
-      - .env.server            # fornece SYNCFUSION_LICENSE_KEY
+    environment:
+      # No Portainer: defina SYNCFUSION_LICENSE_KEY na aba "Environment variables" do stack.
+      # No CLI: docker compose --env-file .env.server up -d --build
+      SYNCFUSION_LICENSE_KEY: ${SYNCFUSION_LICENSE_KEY}
     expose:
       - "80"                   # só exposto na rede interna; quem publica é o Caddy
     networks:
@@ -48,8 +50,10 @@ services:
     image: docx-caddy-ratelimit:local
     container_name: docx-caddy
     restart: unless-stopped
-    env_file:
-      - .env.server            # fornece DOCX_API_KEY (opcional, usado no Caddyfile)
+    environment:
+      # Opcional: só usado se você ligar o gate por API key no Caddyfile.
+      # Vazio = gate desligado. No Portainer, defina na aba "Environment variables".
+      DOCX_API_KEY: ${DOCX_API_KEY:-}
     ports:
       # MODO TÚNEL: publica só no localhost, numa porta ALEATÓRIA -> Caddy interno :8080.
       # O túnel (Cloudflare/ngrok) aponta para http://localhost:42811.

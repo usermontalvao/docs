@@ -29,9 +29,9 @@ Este serviço resolve os três pontos: confiável, seu, e com CORS restrito ao C
 ## TL;DR
 
 ```bash
-cp .env.server.example .env.server            # e preencha a licença
-docker compose up -d --build                  # --build compila o Caddy com rate limit
-cloudflared tunnel --url http://localhost:42811   # (ou ngrok http 42811)
+cp .env.server.example .env.server                     # e preencha a licença
+docker compose --env-file .env.server up -d --build    # (no Portainer: use env vars da UI)
+cloudflared tunnel --url http://localhost:42811        # (ou ngrok http 42811)
 # aponte VITE_SYNC_FUSION do CRM para https://SUA-URL-DO-TUNEL/api/documenteditor/
 ```
 
