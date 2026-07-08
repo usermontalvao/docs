@@ -119,6 +119,12 @@
 		expression `"{$DOCX_API_KEY}" != "" && {http.request.method} != "OPTIONS" && {http.request.header.X-Api-Key} != "{$DOCX_API_KEY}"`
 	}
 	handle @unauthorized {
+		header @allowed {
+			Access-Control-Allow-Origin "{allowed_origin}"
+			Access-Control-Allow-Methods "GET, POST, OPTIONS"
+			Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With, X-Api-Key"
+			Vary "Origin"
+		}
 		header Content-Type "application/json; charset=utf-8"
 		respond `{"error":"unauthorized","hint":"Requisição sem X-Api-Key válido. Veja DEPLOY.md > Segurança."}` 401
 	}

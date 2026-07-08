@@ -182,6 +182,8 @@ Para ligar:
    `beforeXmlHttpRequestSend` em `src/components/SyncfusionEditor.tsx`; adicione uma env
    `VITE_DOCX_API_KEY` e injete `{ 'X-Api-Key': import.meta.env.VITE_DOCX_API_KEY }` junto
    dos headers quando o `serviceUrl` apontar para o servidor docx.
+   No CRM deste workspace, defina `VITE_DOCX_API_KEY` no `.env` local e nas envvars do deploy
+   com o mesmo valor de `DOCX_API_KEY` configurado no servidor do conversor.
 4. `docker compose --env-file .env.server up -d --build` para recompilar e recarregar o Caddy.
 
 Verifique com o smoke test: `DOCX_API_KEY=sua-chave ./smoke-test.sh` deve mostrar
