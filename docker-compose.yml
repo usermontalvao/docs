@@ -1,0 +1,68 @@
+# Serviço de conversão DOCX <-> SFDT do Syncfusion (Word Processor Server).
+#
+# Este compose sobe DOIS containers:
+#   1) word-processor-server  -> o conversor oficial do Syncfusion (interno, porta 80)
+#   2) caddy                  -> reverse proxy com HTTPS automático + CORS restrito
+#
+# O CRM (frontend estático) continua no Render. Só o Import de DOCX do editor
+# passa a bater aqui, em vez do endpoint demo público do Syncfusion.
+#
+# Uso:
+#   1) copie .env.server.example para .env.server e preencha as variáveis
+#   2) docker compose up -d
+#   3) aponte VITE_SYNC_FUSION do CRM para https://SEU_DOMINIO/api/documenteditor/
+#
+# Veja DEPLOY.md para o passo a passo completo (DNS, TLS, verificação).
+
+services:
+  word-processor-server:
+    image: syncfusion/word-processor-server:latest
+    container_name: docx-word-processor
+    restart: unless-stopped
+    env_file:
+      - .env.server            # fornece SYNCFUSION_LICENSE_KEY
+    expose:
+      - "80"                   # só exposto na rede interna; quem publica é o Caddy
+    networks:
+      - docxnet
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1g
+    # O healthcheck depende de curl OU wget existirem na imagem base (.NET aspnet).
+    # Se o container ficar marcado como "unhealthy" sem motivo, comente este bloco;
+    # o restart:unless-stopped já garante a resiliência.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:80/api/documenteditor/ >/dev/null 2>&1 || wget -qO- http://localhost:80/api/documenteditor/ >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 45s
+
+  caddy:
+    image: caddy:2
+    container_name: docx-caddy
+    restart: unless-stopped
+    env_file:
+      - .env.server            # fornece DOCX_DOMAIN e ACME_EMAIL (usados no Caddyfile)
+    ports:
+      - "80:80"                # necessário para o desafio HTTP-01 do Let's Encrypt
+      - "443:443"
+      - "443:443/udp"          # HTTP/3
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data       # certificados TLS persistidos
+      - caddy_config:/config
+    depends_on:
+      - word-processor-server
+    networks:
+      - docxnet
+
+networks:
+  docxnet:
+    driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:

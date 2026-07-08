@@ -1,0 +1,6 @@
+# Segredos reais — nunca comitar. Use .env.server.example como modelo.
+.env.server
+
+# Dados/estado do Caddy caso alguém rode fora de volume nomeado
+caddy_data/
+caddy_config/

@@ -1,0 +1,67 @@
+# Reverse proxy do serviço de conversão Syncfusion.
+# - HTTPS automático (Let's Encrypt) para o domínio em {$DOCX_DOMAIN}
+# - CORS restrito: só reflete a Origin se ela estiver na allowlist abaixo
+# - Remove qualquer header CORS que o container mande, para nunca duplicar
+#
+# As variáveis {$DOCX_DOMAIN} e {$ACME_EMAIL} vêm do .env.server (via env_file no compose).
+
+{
+	# E-mail usado pelo Let's Encrypt para avisos de expiração de certificado.
+	email {$ACME_EMAIL}
+}
+
+{$DOCX_DOMAIN} {
+	log
+
+	# --- Allowlist de CORS ---------------------------------------------------
+	# Mapeia a Origin recebida para o valor permitido. EDITE as linhas abaixo
+	# com os domínios reais do seu CRM. Qualquer Origin fora da lista cai no
+	# "default" (string vazia) e NÃO recebe header CORS -> o browser bloqueia.
+	map {header.Origin} {allowed_origin} {
+		https://crm-advogado.onrender.com  "https://crm-advogado.onrender.com"
+		https://app.seudominio.com.br      "https://app.seudominio.com.br"
+		# http://localhost:5173            "http://localhost:5173"   # descomente p/ testar local
+		default                            ""
+	}
+
+	# Só aplica CORS quando a Origin foi reconhecida na allowlist.
+	@allowed expression {allowed_origin} != ""
+
+	# --- Preflight (OPTIONS) -------------------------------------------------
+	# Responde direto no proxy, sem encaminhar ao container.
+	@preflight method OPTIONS
+	handle @preflight {
+		header @allowed {
+			Access-Control-Allow-Origin "{allowed_origin}"
+			Access-Control-Allow-Methods "GET, POST, OPTIONS"
+			Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With"
+			Access-Control-Max-Age "86400"
+			Vary "Origin"
+		}
+		respond 204
+	}
+
+	# --- Requisições reais (Import, etc.) ------------------------------------
+	handle {
+		header @allowed {
+			Access-Control-Allow-Origin "{allowed_origin}"
+			Access-Control-Allow-Methods "GET, POST, OPTIONS"
+			Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With"
+			Vary "Origin"
+		}
+
+		reverse_proxy word-processor-server:80 {
+			# Se o próprio container já mandar CORS, remove aqui para não duplicar
+			# (dois Access-Control-Allow-Origin fazem o browser rejeitar a resposta).
+			header_down -Access-Control-Allow-Origin
+			header_down -Access-Control-Allow-Methods
+			header_down -Access-Control-Allow-Headers
+
+			# Uploads de DOCX podem demorar em arquivos grandes.
+			transport http {
+				read_timeout 120s
+				write_timeout 120s
+			}
+		}
+	}
+}
