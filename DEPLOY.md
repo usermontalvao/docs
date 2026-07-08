@@ -214,7 +214,7 @@ Qualquer `[FAIL]` aponta o que quebrou (ex.: conversão sem SFDT = licença inv�
 
 | Sintoma | Causa provável | O que fazer |
 |---|---|---|
-| `health/live` responde, `health/ready` dá **502** | Word Processor caiu ou ainda subindo | `docker compose ps`; `docker compose logs word-processor-server`; aguarde o `start_period` (45s) |
+| `health/live` responde, `health/ready` dá **502** | Word Processor caiu ou ainda subindo | `docker compose ps`; `docker compose logs word-processor-server`; aguarde a subida inicial do container |
 | Conversão volta **200** mas sem `sfdt` no corpo | Licença Syncfusion ausente/inválida ou não cobre server-side | Confira `SYNCFUSION_LICENSE_KEY`; precisa cobrir **Document Processing / DocIO** |
 | Editor do CRM: erro de **CORS** no console (mas curl dá 200) | Origin do CRM fora da allowlist | Adicione a Origin exata no bloco `map {header.Origin}` do Caddyfile e **rebuild** |
 | Tudo volta **403 CORS origin not allowed** | Origin não bate (http vs https, com/sem `www`, porta) | A Origin é o domínio do **CRM**, não o do túnel; copie exatamente do DevTools |

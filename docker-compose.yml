@@ -43,22 +43,12 @@ services:
         limits:
           cpus: "1.0"
           memory: 1g
-    # O healthcheck depende de curl OU wget existirem na imagem base (.NET aspnet).
-    # Se o container ficar marcado como "unhealthy" sem motivo, comente este bloco;
-    # o restart:unless-stopped já garante a resiliência.
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:80/api/documenteditor/ >/dev/null 2>&1 || wget -qO- http://localhost:80/api/documenteditor/ >/dev/null 2>&1 || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 45s
 
   caddy:
     # Imagem custom: Caddy + plugin de rate limit (ver Dockerfile).
     build:
       context: .
       dockerfile: Dockerfile
-    image: docx-caddy-ratelimit:local
     container_name: docx-caddy
     restart: unless-stopped
     # Endurecimento: impede escalada de privilégios dentro do container.
@@ -78,8 +68,7 @@ services:
       - caddy_data:/data       # estado interno do Caddy (não há mais cert TLS aqui)
       - caddy_config:/config
     depends_on:
-      word-processor-server:
-        condition: service_healthy
+      - word-processor-server
     networks:
       - docxnet
     logging:
