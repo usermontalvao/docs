@@ -60,7 +60,7 @@ services:
       # Trocar a porta aleatória? Mude só o número da esquerda (host).
       - "127.0.0.1:42811:8080"
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Caddyfile agora é embutido na imagem (COPY no Dockerfile) — sem bind mount.
       - caddy_data:/data       # estado interno do Caddy (não há mais cert TLS aqui)
       - caddy_config:/config
     depends_on:

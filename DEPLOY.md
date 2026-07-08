@@ -43,13 +43,17 @@ expõe pra internet (com HTTPS) é o túnel.
 ## Passo a passo
 
 > ### Usando Portainer?
-> - Deploy como **stack de "Git repository"** apontando para o repositório desta pasta
->   (`docs`). NÃO cole só o conteúdo do compose — ele precisa dos arquivos `Dockerfile`
->   e `Caddyfile` no mesmo diretório (`build: .` e mount `./Caddyfile`).
+> - **Obrigatório:** deploy como **stack de "Git repository"** apontando para o repositório
+>   desta pasta (`docs`). NÃO cole só o YAML no web editor — o `build: .` precisa do
+>   `Dockerfile` **e** do `Caddyfile` no contexto (o Caddyfile é copiado pra dentro da imagem).
+>   Colar só o compose = build sem os arquivos = os erros que você viu.
 > - As variáveis vão na aba **"Environment variables"** do stack (não em `.env.server`):
 >   - `SYNCFUSION_LICENSE_KEY` = sua licença
 >   - `DOCX_API_KEY` = deixe vazio (ou uma chave, se for ligar o gate)
-> - Marque a opção de build/"pull and redeploy" para o Portainer compilar o `Dockerfile`.
+> - O Caddy é **imagem custom** (`build:`). Garanta que o Portainer **buildte** o Dockerfile
+>   (não force "pull" da `docx-caddy-ratelimit:local`, que não existe em registry).
+> - Editou o `Caddyfile` (ex.: CORS)? Faça **git push** e **redeploy com rebuild** — o
+>   Caddyfile é embutido na imagem, então só recompilando ele muda.
 > - Pule os passos 1 e 4 abaixo (que são a via CLI) — o resto (CORS, porta, túnel) vale igual.
 
 ### 1. Subir os arquivos no host (via CLI)
@@ -64,6 +68,8 @@ expõe pra internet (com HTTPS) é o túnel.
 - [ ] Edite o `Caddyfile`, bloco `map {header.Origin} ...`, e deixe **apenas** os
       domínios reais do seu CRM na allowlist (ex.: `https://crm-advogado.onrender.com`).
       A Origin é sempre o domínio do CRM — **não** o domínio do túnel.
+- [ ] O Caddyfile é **embutido na imagem** (COPY no `Dockerfile`), então qualquer edição
+      nele exige **rebuild** (`docker compose ... up -d --build`). Não há bind mount.
 
 ### 3. (Opcional) Escolher outra porta aleatória
 - [ ] A porta do host é **42811** (em `docker-compose.yml`, `127.0.0.1:42811:8080`).
