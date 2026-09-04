@@ -10,6 +10,9 @@
 #   - rate limit por IP
 #   - limite de tamanho de upload
 #   - allowlist de ROTAS (tudo fora de /api/documenteditor/*, /health/* e /status -> 404)
+#   - roteamento de /api/documenteditor/ConvertToPdf para o pdf-service (imagem nossa),
+#     com rate limit próprio e timeout maior; TODO o resto continua indo para o
+#     word-processor-server oficial, sem alteração
 #   - allowlist de MÉTODOS (fora de GET/POST/OPTIONS -> 405)
 #   - headers de segurança e remoção de headers que vazam stack
 #   - logs de acesso estruturados (JSON) para diagnóstico
@@ -147,6 +150,44 @@
 		header Content-Type "application/json; charset=utf-8"
 		header Vary "Origin"
 		respond `{"error":"CORS origin not allowed","hint":"Adicione a origin do CRM no bloco map {header.Origin} do Caddyfile."}` 403
+	}
+
+	# --- Conversão DOCX -> PDF (serviço nosso) --------------------------------
+	# Precisa vir ANTES do @api genérico: blocos `handle` são exclusivos entre si e
+	# avaliados na ordem em que aparecem aqui. Invertido, o @api engoliria esta rota
+	# e o pedido de PDF iria parar no Word Processor, que não sabe convertê-lo.
+	@convert_pdf path /api/documenteditor/ConvertToPdf
+	handle @convert_pdf {
+		# Limite mais apertado que o das outras rotas: converter para PDF é a operação
+		# mais cara do serviço, e é a única que um abusador teria motivo para repetir.
+		rate_limit {
+			zone pdf_per_ip {
+				key {http.request.header.X-Forwarded-For}
+				events 30
+				window 1m
+			}
+		}
+
+		request_body {
+			max_size 30MB
+		}
+
+		header @allowed {
+			Access-Control-Allow-Origin "{allowed_origin}"
+			Access-Control-Allow-Methods "GET, POST, OPTIONS"
+			Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With, X-Api-Key"
+			Vary "Origin"
+		}
+
+		reverse_proxy pdf-service:8080 {
+			# Desenhar um documento longo passa fácil dos 2 minutos que bastam para o
+			# Import. Curto demais aqui vira 502 no meio de uma conversão que ia dar certo.
+			transport http {
+				dial_timeout 5s
+				read_timeout 300s
+				write_timeout 300s
+			}
+		}
 	}
 
 	# --- Requisições reais à API (Import, etc.) ------------------------------

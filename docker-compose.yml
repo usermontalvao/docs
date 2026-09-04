@@ -1,8 +1,15 @@
 # Serviço de conversão DOCX <-> SFDT do Syncfusion (Word Processor Server).
 #
-# Este compose sobe DOIS containers:
-#   1) word-processor-server  -> o conversor oficial do Syncfusion (interno, porta 80)
-#   2) caddy                  -> reverse proxy (modo túnel): CORS restrito + rate limit +
+# Este compose sobe TRÊS containers:
+#   1) word-processor-server  -> o conversor oficial do Syncfusion (interno, porta 80).
+#                               NÃO customizado: as rotas de hoje (Import, Export,
+#                               ExportSFDT, MailMerge, SpellCheck...) seguem servidas
+#                               pelo binário oficial, sem alteração nenhuma.
+#   2) pdf-service            -> imagem NOSSA (ASP.NET Core 8 + Syncfusion DocIORenderer)
+#                               que atende só POST /api/documenteditor/ConvertToPdf:
+#                               .docx entra, application/pdf sai. Existe porque a imagem
+#                               oficial não embarca o DocIORenderer.
+#   3) caddy                  -> reverse proxy (modo túnel): CORS restrito + rate limit +
 #                               allowlist de rotas/métodos + health endpoints. O HTTPS
 #                               público é do túnel (Cloudflare/ngrok), não do Caddy.
 #
@@ -44,6 +51,47 @@ services:
           cpus: "1.0"
           memory: 1g
 
+  pdf-service:
+    # Imagem NOSSA: ASP.NET Core 8 + Syncfusion DocIORenderer (ver pdf-service/Dockerfile).
+    # No Portainer, como o stack vem de repositório Git, o `build` acha o contexto sozinho.
+    build:
+      context: ./pdf-service
+      dockerfile: Dockerfile
+    container_name: docx-pdf-service
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      # MESMA licença do word-processor-server; precisa cobrir Document Processing / DocIO.
+      SYNCFUSION_LICENSE_KEY: ${SYNCFUSION_LICENSE_KEY}
+      # Gate opcional da rota de PDF. VAZIO = desligado (comportamento de hoje).
+      # Preenchido, exige o header X-Api-Key. Ver .env.server.example.
+      PDF_API_KEY: ${PDF_API_KEY:-}
+      ASPNETCORE_HTTP_PORTS: "8080"
+    expose:
+      - "8080"                 # só na rede interna; quem publica é o Caddy
+    networks:
+      - docxnet
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          # Rasterizar/desenhar um DOCX grande custa mais que converter para SFDT.
+          # Se um documento longo estourar, suba a memória antes da CPU.
+          cpus: "2.0"
+          memory: 2g
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health/live >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      # A primeira subida do .NET + registro de licença leva alguns segundos.
+      start_period: 30s
+
   caddy:
     # Imagem custom: Caddy + plugin de rate limit (ver Dockerfile).
     build:
@@ -65,6 +113,7 @@ services:
       - caddy_config:/config
     depends_on:
       - word-processor-server
+      - pdf-service
     networks:
       - docxnet
     logging:

@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>JuriusPdfService</AssemblyName>
+    <RootNamespace>JuriusPdfService</RootNamespace>
+    <!-- ICU completo: o DocIO usa cultura para números, datas e quebra de linha.
+         Com InvariantGlobalization o layout de documentos pt-BR pode divergir. -->
+    <InvariantGlobalization>false</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Quem converte Word -> PDF. Puxa junto DocIO, Pdf, OfficeChart, Compression
+         e SkiaSharp.HarfBuzz. É o componente que a imagem oficial
+         `syncfusion/word-processor-server` NAO traz. -->
+    <PackageReference Include="Syncfusion.DocIORenderer.Net.Core" Version="34.2.6" />
+
+    <!-- Binarios nativos do Skia para Linux. A VERSAO PRECISA ACOMPANHAR o SkiaSharp
+         que o DocIORenderer resolve: o 34.2.6 depende de SkiaSharp.HarfBuzz >= 3.119.1,
+         entao aqui vai 3.119.1. Subir para a linha 4.x sem subir o DocIORenderer junto
+         quebra em tempo de execucao (assembly gerenciado 3.x contra nativo 4.x). -->
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="3.119.1" />
+  </ItemGroup>
+
+</Project>
