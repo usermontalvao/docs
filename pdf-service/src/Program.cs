@@ -65,6 +65,21 @@ if (chavePresente)
 
 var versaoDocIORenderer = typeof(DocIORenderer).Assembly.GetName().Version?.ToString() ?? "desconhecida";
 
+// Impressão digital: SHA-256 da chave, 8 primeiros hex. NÃO é a chave e não
+// permite reconstruí-la — serve só para responder "o valor que está rodando é o
+// mesmo que eu colei?". Sem isso não dá para separar "chave nova recusada" de
+// "chave nova nem chegou ao container", que é a dúvida do momento.
+var impressaoDigital = chavePresente
+    ? Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(licenca!.Trim()))).ToLowerInvariant()[..8]
+    : string.Empty;
+
+// Comprimento pega truncamento na colagem (o sintoma é idêntico ao de chave inválida).
+var comprimentoDaChave = licenca?.Trim().Length ?? 0;
+
+// Quando ESTE processo subiu. Se não mudou desde a última leitura, o container
+// não foi recriado — e variável de ambiente só muda quando ele é recriado.
+var processoIniciadoEm = DateTime.UtcNow.ToString("o");
+
 // ---------------------------------------------------------------------------
 // O diagnóstico é feito por REFLEXÃO, de propósito.
 //
@@ -245,9 +260,11 @@ if (apiDisponivel && tipoPlatform is not null)
 var listaCobertas = cobertura.Where(par => par.Value).Select(par => par.Key).ToArray();
 
 app.Logger.LogInformation(
-    "Licença: chavePresente={presente} nChaves={n} DocIORenderer={versao} apiDeValidacao={api}",
+    "Licença: chavePresente={presente} nChaves={n} impressão={fp} tamanho={len} DocIORenderer={versao} apiDeValidacao={api}",
     chavePresente,
     quantidadeDeChaves,
+    impressaoDigital,
+    comprimentoDaChave,
     versaoDocIORenderer,
     apiDisponivel ? "disponível" : motivoIndisponivel);
 
@@ -283,6 +300,9 @@ app.MapGet("/api/documenteditor/LicenseStatus", () => Results.Json(new
 {
     chavePresente,
     quantidadeDeChaves,
+    impressaoDigital,
+    comprimentoDaChave,
+    processoIniciadoEm,
     versaoDocIORenderer,
     apiDeValidacaoDisponivel = apiDisponivel,
     motivoIndisponivel,
