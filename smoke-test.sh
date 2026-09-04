@@ -170,6 +170,31 @@ fi
 echo "     PDF gerado em: $pdf_out  (abra e compare o layout com o DOCX de origem)"
 [ -n "$smoke_tmp_docx" ] && rm -f "$smoke_tmp_docx"
 
+# 10) Diagnóstico de licença (só booleanos; a chave nunca sai do container) ----
+lic_json="$(curl -s "$BASE_URL/api/documenteditor/LicenseStatus" --max-time 20)"
+lic_code="$(status_of "$BASE_URL/api/documenteditor/LicenseStatus")"
+check "LicenseStatus responde 200" 200 "$lic_code"
+
+case "$lic_json" in
+  *'"chavePresente":true'*) ok "a chave chegou ao container" ;;
+  *'"chavePresente":false'*) bad "SYNCFUSION_LICENSE_KEY não chegou ao pdf-service — confira as env vars do stack" ;;
+  *) bad "LicenseStatus sem resposta reconhecível (${lic_json:0:120})" ;;
+esac
+
+# É esta linha que decide se o serviço pode gerar PDF sem marca d'água.
+case "$lic_json" in
+  *'"WordToPDF":{"valida":true'*) ok "a licença cobre WordToPDF" ;;
+  *'"WordToPDF":{"valida":false'*) bad "a licença NÃO cobre WordToPDF — é preciso o Document SDK (Word/WordToPDF); ver DEPLOY.md" ;;
+  *) bad "não consegui ler o foco WordToPDF no LicenseStatus" ;;
+esac
+
+# Versão do renderizador: chave da Syncfusion é presa à versão, então isto é
+# metade do diagnóstico quando WordToPDF dá falso.
+lic_versao="$(printf '%s' "$lic_json" | sed -n 's/.*"versaoDocIORenderer":"\([^"]*\)".*/\1/p')"
+echo "     DocIORenderer no container: ${lic_versao:-desconhecida}"
+lic_cobertas="$(printf '%s' "$lic_json" | sed -n 's/.*"plataformasCobertas":\[\([^]]*\)\].*/\1/p')"
+echo "     Plataformas cobertas pela chave: ${lic_cobertas:-nenhuma}"
+
 # Resumo ----------------------------------------------------------------------
 echo
 echo "== Resultado: $(green "$pass ok") / $([ "$fail" -gt 0 ] && red "$fail falhas" || echo '0 falhas') =="

@@ -10,9 +10,9 @@
 #   - rate limit por IP
 #   - limite de tamanho de upload
 #   - allowlist de ROTAS (tudo fora de /api/documenteditor/*, /health/* e /status -> 404)
-#   - roteamento de /api/documenteditor/ConvertToPdf para o pdf-service (imagem nossa),
-#     com rate limit próprio e timeout maior; TODO o resto continua indo para o
-#     word-processor-server oficial, sem alteração
+#   - roteamento de /api/documenteditor/ConvertToPdf e /LicenseStatus para o
+#     pdf-service (imagem nossa), com rate limit próprio e timeout maior; TODO o
+#     resto continua indo para o word-processor-server oficial, sem alteração
 #   - allowlist de MÉTODOS (fora de GET/POST/OPTIONS -> 405)
 #   - headers de segurança e remoção de headers que vazam stack
 #   - logs de acesso estruturados (JSON) para diagnóstico
@@ -152,12 +152,15 @@
 		respond `{"error":"CORS origin not allowed","hint":"Adicione a origin do CRM no bloco map {header.Origin} do Caddyfile."}` 403
 	}
 
-	# --- Conversão DOCX -> PDF (serviço nosso) --------------------------------
+	# --- Serviço de PDF: conversão e diagnóstico de licença (imagem nossa) ----
 	# Precisa vir ANTES do @api genérico: blocos `handle` são exclusivos entre si e
 	# avaliados na ordem em que aparecem aqui. Invertido, o @api engoliria esta rota
 	# e o pedido de PDF iria parar no Word Processor, que não sabe convertê-lo.
-	@convert_pdf path /api/documenteditor/ConvertToPdf
-	handle @convert_pdf {
+	# LicenseStatus vai junto: é diagnóstico do MESMO serviço, e só devolve booleanos
+	# (nunca a chave). Ter isso por HTTP evita depender de acesso ao host para saber
+	# por que um PDF saiu com marca d'água.
+	@pdf_service path /api/documenteditor/ConvertToPdf /api/documenteditor/LicenseStatus
+	handle @pdf_service {
 		# Limite mais apertado que o das outras rotas: converter para PDF é a operação
 		# mais cara do serviço, e é a única que um abusador teria motivo para repetir.
 		rate_limit {

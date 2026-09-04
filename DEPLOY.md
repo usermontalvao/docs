@@ -82,6 +82,57 @@ ASP.NET Core 8 + `Syncfusion.DocIORenderer.Net.Core`, ~200 linhas em
   linha 4.x sem subir o DocIORenderer quebra em tempo de execução.
 - **Gate opcional:** `PDF_API_KEY` (ver `.env.server.example`). Vazio = desligado.
 
+### Diagnóstico de licença
+
+A partir da **31.x a Syncfusion separou as edições**. A chave que habilita o DOCX
+Editor (`WordEditor`) pode **não** habilitar o Document SDK (`Word`, `WordToPDF`) —
+e é `WordToPDF` que este serviço precisa. Foi o que aconteceu no primeiro deploy:
+o `Import` funcionava, o PDF saía com marca d'água.
+
+O serviço valida isso sozinho e publica o resultado — **só booleanos, a chave nunca
+sai do container**:
+
+```bash
+curl -s https://SEU-TUNEL/api/documenteditor/LicenseStatus
+```
+
+```jsonc
+{
+  "chavePresente": true,           // a env var chegou?
+  "quantidadeDeChaves": 1,         // contagem, nunca o conteúdo
+  "versaoDocIORenderer": "34.2.6.0",
+  "focos": {
+    "WordToPDF":  { "valida": false, "existeNestaVersao": true, "mensagem": "..." },
+    "Word":       { "valida": false, "existeNestaVersao": true, "mensagem": "..." },
+    "WordEditor": { "valida": true,  "existeNestaVersao": true, "mensagem": "" }
+  },
+  "plataformasCobertas":   ["WordEditor"],
+  "plataformasDescobertas": ["Word", "WordToPDF", "PDF", "..."]
+}
+```
+
+O mesmo sai no log da subida: `docker compose logs pdf-service | grep -i licen`.
+
+Como ler o resultado:
+
+| Sintoma | Significa | O que fazer |
+|---|---|---|
+| `chavePresente: false` | a env var não chegou | conferir `SYNCFUSION_LICENSE_KEY` nas variáveis do stack |
+| `WordToPDF: false` e `WordEditor: true` | a chave é da edição do **Editor**, não do **Document SDK** | gerar no portal a licença de **Document SDK / File Formats** que cubra `WordToPDF` |
+| tudo `false` com chave presente | chave de **outra versão** | a chave é presa à versão; gerar para a **34.2.x**, ou fixar o pacote na versão da chave (`pdf-service/src/JuriusPdfService.csproj`) |
+| `existeNestaVersao: false` | o nome saiu do enum nesta versão | ver a lista em `plataformasCobertas` |
+
+**Duas chaves legítimas cabem juntas.** `RegisterLicense` aceita várias separadas
+por `;` ou `,` numa chamada só, então uma combinação DOCX Editor + Document SDK vai
+inteira na mesma variável, sem mudar código:
+
+```
+SYNCFUSION_LICENSE_KEY=CHAVE_DO_EDITOR;CHAVE_DO_DOCUMENT_SDK
+```
+
+A marca d'água **não tem contorno no código** — e não se deve procurar um. Ela some
+quando a licença cobrir `WordToPDF`, e não antes.
+
 ### ⚠️ O serviço está aberto
 
 O `DOCX_API_KEY` que o `.env.server.example` descrevia **nunca foi implementado**: o

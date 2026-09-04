@@ -18,6 +18,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Microsoft.AspNetCore.Http.Features;
 using Syncfusion.DocIORenderer;
+using Syncfusion.Licensing;
 using Syncfusion.Pdf;
 
 // Aliases explícitos, como no controller oficial: vários namespaces do Syncfusion
@@ -37,18 +38,98 @@ builder.Services.Configure<FormOptions>(options => options.MultipartBodyLengthLi
 var app = builder.Build();
 
 // A licença é a MESMA variável que o word-processor-server já usa, de propósito:
-// o compose passa `SYNCFUSION_LICENSE_KEY` para os dois containers. Ela precisa
-// cobrir Document Processing / DocIO — cobrir só o editor JS não basta.
+// o compose passa `SYNCFUSION_LICENSE_KEY` para os dois containers.
+//
+// A partir da 31.x a Syncfusion SEPAROU as edições: a chave que habilita o DOCX
+// Editor (`WordEditor`) pode não habilitar o Document SDK (`Word`, `WordToPDF`) —
+// e é `WordToPDF` que este serviço precisa. Por isso não basta registrar: é
+// preciso VALIDAR e dizer o que a chave cobre.
+//
+// `RegisterLicense` aceita VÁRIAS chaves numa chamada só, separadas por `;` ou `,`
+// (documentado pela Syncfusion). Então uma combinação legítima — por exemplo DOCX
+// Editor + Document SDK — cabe inteira na variável de ambiente, sem mudar código.
 var licenca = Environment.GetEnvironmentVariable("SYNCFUSION_LICENSE_KEY");
-if (!string.IsNullOrWhiteSpace(licenca))
+var chavePresente = !string.IsNullOrWhiteSpace(licenca);
+
+// Só a CONTAGEM, nunca o conteúdo. A chave não pode aparecer em log nem em resposta.
+var quantidadeDeChaves = chavePresente
+    ? licenca!.Split(new[] { ';', ',' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Length
+    : 0;
+
+if (chavePresente)
 {
-    Syncfusion.Licensing.SyncfusionLicenseProvider.RegisterLicense(licenca);
-    app.Logger.LogInformation("Licença Syncfusion registrada.");
+    // `!`: o compilador não liga `chavePresente` a `licenca` sozinho.
+    SyncfusionLicenseProvider.RegisterLicense(licenca!);
 }
-else
+
+var versaoDocIORenderer = typeof(DocIORenderer).Assembly.GetName().Version?.ToString() ?? "desconhecida";
+
+// As três que decidem se este serviço pode existir sem marca d'água.
+var focos = new[] { "WordToPDF", "Word", "WordEditor" }
+    .ToDictionary(nome => nome, nome => ValidarPlataforma(nome, licenca));
+
+// Mapa completo: é ele que diz QUAL edição comprar, se faltar alguma.
+var cobertura = new SortedDictionary<string, bool>(StringComparer.Ordinal);
+foreach (var plataforma in Enum.GetValues<Platform>())
 {
-    app.Logger.LogWarning("SYNCFUSION_LICENSE_KEY vazia: o PDF sairá com marca d'água de avaliação.");
+    try
+    {
+        cobertura[plataforma.ToString()] = SyncfusionLicenseProvider.ValidateLicense(plataforma);
+    }
+    catch
+    {
+        // Uma plataforma que explode ao validar não pode derrubar o diagnóstico inteiro.
+        cobertura[plataforma.ToString()] = false;
+    }
 }
+
+app.Logger.LogInformation(
+    "Licença: chave presente={presente}, nº de chaves={n}, DocIORenderer={versao}",
+    chavePresente,
+    quantidadeDeChaves,
+    versaoDocIORenderer);
+
+foreach (var (nome, resultado) in focos)
+{
+    app.Logger.LogInformation(
+        "Licença[{plataforma}]: valida={valida} existeNestaVersao={existe} — {mensagem}",
+        nome,
+        resultado.Valida,
+        resultado.ExisteNestaVersao,
+        resultado.Mensagem);
+}
+
+app.Logger.LogInformation(
+    "Licença: plataformas cobertas = {cobertas}",
+    string.Join(", ", cobertura.Where(par => par.Value).Select(par => par.Key)) is { Length: > 0 } lista
+        ? lista
+        : "NENHUMA");
+
+if (!chavePresente)
+{
+    app.Logger.LogWarning("SYNCFUSION_LICENSE_KEY vazia: o PDF sai com marca d'água de avaliação.");
+}
+else if (!focos["WordToPDF"].Valida)
+{
+    app.Logger.LogError(
+        "A chave NÃO cobre WordToPDF: o PDF sai com marca d'água. Não há contorno no código — " +
+        "é preciso a licença do Document SDK (Word/WordToPDF) para a versão {versao}.",
+        versaoDocIORenderer);
+}
+
+// Diagnóstico legível por HTTP: só booleanos, nunca a chave. Serve para conferir de
+// fora, sem acesso ao host — que foi exatamente o que faltou no primeiro deploy.
+app.MapGet("/api/documenteditor/LicenseStatus", () => Results.Json(new
+{
+    chavePresente,
+    quantidadeDeChaves,
+    versaoDocIORenderer,
+    focos = focos.ToDictionary(
+        par => par.Key,
+        par => new { par.Value.Valida, par.Value.ExisteNestaVersao, par.Value.Mensagem }),
+    plataformasCobertas = cobertura.Where(par => par.Value).Select(par => par.Key).ToArray(),
+    plataformasDescobertas = cobertura.Where(par => !par.Value).Select(par => par.Key).ToArray(),
+}));
 
 app.MapGet("/health/live", () => Results.Json(new
 {
@@ -165,6 +246,53 @@ app.MapPost("/api/documenteditor/ConvertToPdf", async (HttpRequest req) =>
 
 app.Run();
 
+// Valida UMA plataforma pelo NOME, não pelo membro do enum. É de propósito: os
+// membros do `Platform` mudaram entre versões (a 34.1.29 removeu WPF, Blazor e
+// companhia), e um nome que não existe mais viraria erro de compilação em vez de
+// diagnóstico. Assim, "não existe nesta versão" é uma resposta, não uma quebra.
+static ResultadoDeLicenca ValidarPlataforma(string nome, string? chave)
+{
+    if (!Enum.TryParse<Platform>(nome, ignoreCase: false, out var plataforma))
+    {
+        return new ResultadoDeLicenca(false, false, $"Platform.{nome} não existe nesta versão do Syncfusion.Licensing.");
+    }
+
+    try
+    {
+        var valida = SyncfusionLicenseProvider.ValidateLicense(plataforma, out var mensagem);
+        return new ResultadoDeLicenca(valida, true, Redigir(mensagem, chave));
+    }
+    catch (Exception erro)
+    {
+        return new ResultadoDeLicenca(false, true, Redigir(erro.Message, chave));
+    }
+}
+
+// Rede de segurança: se a mensagem da Syncfusion ecoar a chave, ela não sai daqui.
+static string Redigir(string? mensagem, string? chave)
+{
+    if (string.IsNullOrEmpty(mensagem))
+    {
+        return string.Empty;
+    }
+
+    if (string.IsNullOrWhiteSpace(chave))
+    {
+        return mensagem;
+    }
+
+    var limpa = mensagem;
+    foreach (var parte in chave.Split(new[] { ';', ',' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+    {
+        if (parte.Length >= 8)
+        {
+            limpa = limpa.Replace(parte, "[CHAVE OMITIDA]", StringComparison.Ordinal);
+        }
+    }
+
+    return limpa;
+}
+
 // Gate opcional. Vazio = desligado, que é o estado de hoje do serviço (o Caddy
 // filtra Origin, o que não protege chamada servidor-a-servidor). Preenchido, vale
 // para ESTA rota apenas — e aqui a chave é segredo de verdade, porque quem chama
@@ -201,3 +329,7 @@ static WFormatType FormatoPeloNome(string nome)
         _ => WFormatType.Docx,
     };
 }
+
+// Declarado no FIM: num programa top-level, qualquer declaração de tipo precisa vir
+// depois de todas as instruções — e funções locais contam como instruções (CS8803).
+internal readonly record struct ResultadoDeLicenca(bool Valida, bool ExisteNestaVersao, string Mensagem);
