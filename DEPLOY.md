@@ -90,7 +90,9 @@ e é `WordToPDF` que este serviço precisa. Foi o que aconteceu no primeiro depl
 o `Import` funcionava, o PDF saía com marca d'água.
 
 O serviço valida isso sozinho e publica o resultado — **só booleanos, a chave nunca
-sai do container**:
+sai do container**. A validação é resolvida por **reflexão** (`Platform` e
+`ValidateLicense` mudaram de forma entre versões do Syncfusion), de modo que um
+nome ausente vira resposta em vez de erro de compilação:
 
 ```bash
 curl -s https://SEU-TUNEL/api/documenteditor/LicenseStatus
@@ -101,6 +103,8 @@ curl -s https://SEU-TUNEL/api/documenteditor/LicenseStatus
   "chavePresente": true,           // a env var chegou?
   "quantidadeDeChaves": 1,         // contagem, nunca o conteúdo
   "versaoDocIORenderer": "34.2.6.0",
+  "apiDeValidacaoDisponivel": true, // o SDK expõe ValidateLicense nesta versão?
+  "motivoIndisponivel": "",
   "focos": {
     "WordToPDF":  { "valida": false, "existeNestaVersao": true, "mensagem": "..." },
     "Word":       { "valida": false, "existeNestaVersao": true, "mensagem": "..." },
@@ -121,6 +125,7 @@ Como ler o resultado:
 | `WordToPDF: false` e `WordEditor: true` | a chave é da edição do **Editor**, não do **Document SDK** | gerar no portal a licença de **Document SDK / File Formats** que cubra `WordToPDF` |
 | tudo `false` com chave presente | chave de **outra versão** | a chave é presa à versão; gerar para a **34.2.x**, ou fixar o pacote na versão da chave (`pdf-service/src/JuriusPdfService.csproj`) |
 | `existeNestaVersao: false` | o nome saiu do enum nesta versão | ver a lista em `plataformasCobertas` |
+| `apiDeValidacaoDisponivel: false` | o SDK não expõe `ValidateLicense` nesta versão | ler `motivoIndisponivel`; o diagnóstico é resolvido por reflexão, então isso é resposta e não quebra |
 
 **Duas chaves legítimas cabem juntas.** `RegisterLicense` aceita várias separadas
 por `;` ou `,` numa chamada só, então uma combinação DOCX Editor + Document SDK vai

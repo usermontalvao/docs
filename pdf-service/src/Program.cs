@@ -14,6 +14,7 @@
 //   GET  /health/live                       — liveness, não toca no Syncfusion
 //   POST /api/documenteditor/ConvertToPdf   — .docx entra, application/pdf sai
 
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.AspNetCore.Http.Features;
@@ -64,52 +65,162 @@ if (chavePresente)
 
 var versaoDocIORenderer = typeof(DocIORenderer).Assembly.GetName().Version?.ToString() ?? "desconhecida";
 
-// As três que decidem se este serviço pode existir sem marca d'água.
-var focos = new[] { "WordToPDF", "Word", "WordEditor" }
-    .ToDictionary(nome => nome, nome => ValidarPlataforma(nome, licenca));
+// ---------------------------------------------------------------------------
+// O diagnóstico é feito por REFLEXÃO, de propósito.
+//
+// `Platform` e `ValidateLicense` mudaram de forma entre versões do Syncfusion:
+// a 31.x trocou o enum de plataformas de UI para edições de produto, e a 34.1.29
+// removeu membros. Escrever `Platform.WordToPDF` direto amarra a COMPILAÇÃO a
+// nomes que podem não existir — e um serviço que não compila não diagnostica
+// nada. Aqui, um nome ausente vira resposta ("não existe nesta versão"), e uma
+// API ausente vira `apiDisponivel: false` com o motivo. Nunca um build quebrado.
+//
+// `SyncfusionLicenseProvider` em si continua ligado em tempo de compilação: ele
+// já era usado no `RegisterLicense` e comprovadamente existe.
+// ---------------------------------------------------------------------------
+var tipoProvider = typeof(SyncfusionLicenseProvider);
+var tipoPlatform = tipoProvider.Assembly.GetType("Syncfusion.Licensing.Platform");
 
-// Mapa completo: é ele que diz QUAL edição comprar, se faltar alguma.
-var cobertura = new SortedDictionary<string, bool>(StringComparer.Ordinal);
-foreach (var plataforma in Enum.GetValues<Platform>())
+MethodInfo? validarComMensagem = null;
+MethodInfo? validarSimples = null;
+var motivoIndisponivel = string.Empty;
+
+if (tipoPlatform is null)
 {
-    try
+    motivoIndisponivel = "enum Syncfusion.Licensing.Platform não existe nesta versão.";
+}
+else
+{
+    foreach (var metodo in tipoProvider.GetMethods(BindingFlags.Public | BindingFlags.Static))
     {
-        cobertura[plataforma.ToString()] = SyncfusionLicenseProvider.ValidateLicense(plataforma);
+        if (metodo.Name != "ValidateLicense")
+        {
+            continue;
+        }
+
+        var parametros = metodo.GetParameters();
+        if (parametros.Length == 1 && parametros[0].ParameterType == tipoPlatform)
+        {
+            validarSimples = metodo;
+        }
+        else if (parametros.Length == 2
+            && parametros[0].ParameterType == tipoPlatform
+            && parametros[1].IsOut)
+        {
+            validarComMensagem = metodo;
+        }
     }
-    catch
+
+    if (validarSimples is null && validarComMensagem is null)
     {
-        // Uma plataforma que explode ao validar não pode derrubar o diagnóstico inteiro.
-        cobertura[plataforma.ToString()] = false;
+        motivoIndisponivel = "SyncfusionLicenseProvider.ValidateLicense não existe nesta versão.";
     }
 }
 
+var apiDisponivel = motivoIndisponivel.Length == 0;
+
+// Invoca a validação para UM valor do enum, preferindo a sobrecarga que explica.
+Func<object, (bool Valida, string Mensagem)> validar = valor =>
+{
+    try
+    {
+        if (validarComMensagem is not null)
+        {
+            var args = new object?[] { valor, null };
+            var ok = (bool)(validarComMensagem.Invoke(null, args) ?? false);
+            return (ok, Redigir(args[1] as string, licenca));
+        }
+
+        if (validarSimples is not null)
+        {
+            return ((bool)(validarSimples.Invoke(null, new[] { valor }) ?? false), string.Empty);
+        }
+
+        return (false, motivoIndisponivel);
+    }
+    catch (Exception erro)
+    {
+        // Uma plataforma que explode não pode derrubar o diagnóstico inteiro.
+        return (false, Redigir((erro.InnerException ?? erro).Message, licenca));
+    }
+};
+
+// As três que decidem se este serviço pode existir sem marca d'água.
+var focos = new Dictionary<string, ResultadoDeLicenca>(StringComparer.Ordinal);
+foreach (var nome in new[] { "WordToPDF", "Word", "WordEditor" })
+{
+    if (!apiDisponivel || tipoPlatform is null)
+    {
+        focos[nome] = new ResultadoDeLicenca(false, false, motivoIndisponivel);
+        continue;
+    }
+
+    object? valor = null;
+    try
+    {
+        if (Enum.IsDefined(tipoPlatform, nome))
+        {
+            valor = Enum.Parse(tipoPlatform, nome);
+        }
+    }
+    catch
+    {
+        valor = null;
+    }
+
+    if (valor is null)
+    {
+        focos[nome] = new ResultadoDeLicenca(false, false, $"Platform.{nome} não existe nesta versão.");
+        continue;
+    }
+
+    var (valida, mensagem) = validar(valor);
+    focos[nome] = new ResultadoDeLicenca(valida, true, mensagem);
+}
+
+// Mapa completo: é ele que diz QUAL edição comprar, se faltar alguma.
+var cobertura = new SortedDictionary<string, bool>(StringComparer.Ordinal);
+if (apiDisponivel && tipoPlatform is not null)
+{
+    foreach (var valor in Enum.GetValues(tipoPlatform))
+    {
+        if (valor is null)
+        {
+            continue;
+        }
+
+        cobertura[valor.ToString() ?? "?"] = validar(valor).Valida;
+    }
+}
+
+var listaCobertas = cobertura.Where(par => par.Value).Select(par => par.Key).ToArray();
+
 app.Logger.LogInformation(
-    "Licença: chave presente={presente}, nº de chaves={n}, DocIORenderer={versao}",
+    "Licença: chavePresente={presente} nChaves={n} DocIORenderer={versao} apiDeValidacao={api}",
     chavePresente,
     quantidadeDeChaves,
-    versaoDocIORenderer);
+    versaoDocIORenderer,
+    apiDisponivel ? "disponível" : motivoIndisponivel);
 
-foreach (var (nome, resultado) in focos)
+foreach (var par in focos)
 {
     app.Logger.LogInformation(
-        "Licença[{plataforma}]: valida={valida} existeNestaVersao={existe} — {mensagem}",
-        nome,
-        resultado.Valida,
-        resultado.ExisteNestaVersao,
-        resultado.Mensagem);
+        "Licença[{plataforma}]: valida={valida} existeNestaVersao={existe} {mensagem}",
+        par.Key,
+        par.Value.Valida,
+        par.Value.ExisteNestaVersao,
+        par.Value.Mensagem);
 }
 
 app.Logger.LogInformation(
     "Licença: plataformas cobertas = {cobertas}",
-    string.Join(", ", cobertura.Where(par => par.Value).Select(par => par.Key)) is { Length: > 0 } lista
-        ? lista
-        : "NENHUMA");
+    listaCobertas.Length > 0 ? string.Join(", ", listaCobertas) : "NENHUMA");
 
 if (!chavePresente)
 {
     app.Logger.LogWarning("SYNCFUSION_LICENSE_KEY vazia: o PDF sai com marca d'água de avaliação.");
 }
-else if (!focos["WordToPDF"].Valida)
+else if (apiDisponivel && !focos["WordToPDF"].Valida)
 {
     app.Logger.LogError(
         "A chave NÃO cobre WordToPDF: o PDF sai com marca d'água. Não há contorno no código — " +
@@ -124,10 +235,12 @@ app.MapGet("/api/documenteditor/LicenseStatus", () => Results.Json(new
     chavePresente,
     quantidadeDeChaves,
     versaoDocIORenderer,
+    apiDeValidacaoDisponivel = apiDisponivel,
+    motivoIndisponivel,
     focos = focos.ToDictionary(
         par => par.Key,
         par => new { par.Value.Valida, par.Value.ExisteNestaVersao, par.Value.Mensagem }),
-    plataformasCobertas = cobertura.Where(par => par.Value).Select(par => par.Key).ToArray(),
+    plataformasCobertas = listaCobertas,
     plataformasDescobertas = cobertura.Where(par => !par.Value).Select(par => par.Key).ToArray(),
 }));
 
@@ -245,28 +358,6 @@ app.MapPost("/api/documenteditor/ConvertToPdf", async (HttpRequest req) =>
 });
 
 app.Run();
-
-// Valida UMA plataforma pelo NOME, não pelo membro do enum. É de propósito: os
-// membros do `Platform` mudaram entre versões (a 34.1.29 removeu WPF, Blazor e
-// companhia), e um nome que não existe mais viraria erro de compilação em vez de
-// diagnóstico. Assim, "não existe nesta versão" é uma resposta, não uma quebra.
-static ResultadoDeLicenca ValidarPlataforma(string nome, string? chave)
-{
-    if (!Enum.TryParse<Platform>(nome, ignoreCase: false, out var plataforma))
-    {
-        return new ResultadoDeLicenca(false, false, $"Platform.{nome} não existe nesta versão do Syncfusion.Licensing.");
-    }
-
-    try
-    {
-        var valida = SyncfusionLicenseProvider.ValidateLicense(plataforma, out var mensagem);
-        return new ResultadoDeLicenca(valida, true, Redigir(mensagem, chave));
-    }
-    catch (Exception erro)
-    {
-        return new ResultadoDeLicenca(false, true, Redigir(erro.Message, chave));
-    }
-}
 
 // Rede de segurança: se a mensagem da Syncfusion ecoar a chave, ela não sai daqui.
 static string Redigir(string? mensagem, string? chave)

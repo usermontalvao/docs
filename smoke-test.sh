@@ -181,6 +181,12 @@ case "$lic_json" in
   *) bad "LicenseStatus sem resposta reconhecível (${lic_json:0:120})" ;;
 esac
 
+case "$lic_json" in
+  *'"apiDeValidacaoDisponivel":false'*)
+    bad "o SDK não expõe a API de validação nesta versão — ver campo motivoIndisponivel" ;;
+  *) : ;;
+esac
+
 # É esta linha que decide se o serviço pode gerar PDF sem marca d'água.
 case "$lic_json" in
   *'"WordToPDF":{"valida":true'*) ok "a licença cobre WordToPDF" ;;
