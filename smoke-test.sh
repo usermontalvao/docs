@@ -155,11 +155,16 @@ else
   bad "PDF pequeno demais ($pdf_bytes bytes) — provável documento em branco"
 fi
 
-# Marca d'água de avaliação = licença ausente ou que não cobre DocIO.
-if grep -qa "Syncfusion" "$pdf_out" 2>/dev/null && grep -qai "trial\|evaluation" "$pdf_out" 2>/dev/null; then
-  bad "PDF traz marca d'água de avaliação — a licença não cobre Document Processing / DocIO"
+# Marca d'água de avaliação = licença ausente, vencida, de OUTRA VERSÃO, ou que não
+# cobre DocIO. O texto do aviso ("Created with a trial version of Syncfusion...") vai
+# COMPRIMIDO dentro do PDF e é invisível ao grep: procurar por "trial"/"Syncfusion" no
+# arquivo cru dá PASS FALSO (aconteceu em 03/09/2026 — o PDF marcado passou).
+# O que sobra em bytes crus é o LINK do aviso, na anotação: um PDF licenciado não
+# tem "syncfusion.com" dentro dele.
+if grep -qa "syncfusion.com" "$pdf_out" 2>/dev/null; then
+  bad "PDF traz marca d'água de avaliação (link syncfusion.com presente) — licença não aceita para DocIO"
 else
-  ok "sem marca d'água de avaliação aparente"
+  ok "sem marca d'água de avaliação"
 fi
 
 echo "     PDF gerado em: $pdf_out  (abra e compare o layout com o DOCX de origem)"
