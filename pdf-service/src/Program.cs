@@ -81,9 +81,18 @@ var versaoDocIORenderer = typeof(DocIORenderer).Assembly.GetName().Version?.ToSt
 var tipoProvider = typeof(SyncfusionLicenseProvider);
 var tipoPlatform = tipoProvider.Assembly.GetType("Syncfusion.Licensing.Platform");
 
-MethodInfo? validarComMensagem = null;
-MethodInfo? validarSimples = null;
+// Aceita as QUATRO formas que a API já teve: escalar ou array, com ou sem a
+// mensagem de saída. A 34.1.29 introduziu a variante em array, e assumir só a
+// escalar foi o que fez o diagnóstico anterior dizer "não existe".
+MethodInfo? validarMetodo = null;
+var validarUsaArray = false;
+var validarTemMensagem = false;
 var motivoIndisponivel = string.Empty;
+
+// Inventário do que REALMENTE existe no provider. Se nada casar, é isto que
+// transforma a próxima tentativa em conserto em vez de palpite.
+var assinaturasValidateLicense = new List<string>();
+var metodosDoProvider = new List<string>();
 
 if (tipoPlatform is null)
 {
@@ -91,52 +100,85 @@ if (tipoPlatform is null)
 }
 else
 {
-    foreach (var metodo in tipoProvider.GetMethods(BindingFlags.Public | BindingFlags.Static))
+    var tipoPlatformArray = tipoPlatform.MakeArrayType();
+
+    foreach (var metodo in tipoProvider.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static))
     {
+        metodosDoProvider.Add($"{(metodo.IsPublic ? "public" : "internal")} {metodo.Name}({string.Join(", ", metodo.GetParameters().Select(par => (par.IsOut ? "out " : string.Empty) + par.ParameterType.Name))})");
+
         if (metodo.Name != "ValidateLicense")
         {
             continue;
         }
 
         var parametros = metodo.GetParameters();
-        if (parametros.Length == 1 && parametros[0].ParameterType == tipoPlatform)
+        assinaturasValidateLicense.Add(string.Join(", ", parametros.Select(par => (par.IsOut ? "out " : string.Empty) + par.ParameterType.Name)));
+
+        var primeiroEhPlatform = parametros.Length >= 1
+            && (parametros[0].ParameterType == tipoPlatform || parametros[0].ParameterType == tipoPlatformArray);
+        if (!primeiroEhPlatform)
         {
-            validarSimples = metodo;
+            continue;
         }
-        else if (parametros.Length == 2
-            && parametros[0].ParameterType == tipoPlatform
-            && parametros[1].IsOut)
+
+        var temMensagem = parametros.Length == 2 && parametros[1].IsOut;
+        if (parametros.Length != 1 && !temMensagem)
         {
-            validarComMensagem = metodo;
+            continue;
+        }
+
+        // Prefere a sobrecarga que explica o motivo; entre iguais, fica a primeira.
+        if (validarMetodo is null || (temMensagem && !validarTemMensagem))
+        {
+            validarMetodo = metodo;
+            validarUsaArray = parametros[0].ParameterType == tipoPlatformArray;
+            validarTemMensagem = temMensagem;
         }
     }
 
-    if (validarSimples is null && validarComMensagem is null)
+    if (validarMetodo is null)
     {
-        motivoIndisponivel = "SyncfusionLicenseProvider.ValidateLicense não existe nesta versão.";
+        motivoIndisponivel = assinaturasValidateLicense.Count > 0
+            ? "ValidateLicense existe, mas nenhuma sobrecarga casa com Platform/Platform[] — ver assinaturasValidateLicense."
+            : "SyncfusionLicenseProvider.ValidateLicense não existe nesta versão — ver metodosDoProvider.";
     }
 }
 
 var apiDisponivel = motivoIndisponivel.Length == 0;
 
-// Invoca a validação para UM valor do enum, preferindo a sobrecarga que explica.
+// Invoca a validação para UM valor do enum, montando o argumento na forma que a
+// sobrecarga encontrada exige (escalar ou array de UM elemento, tipado).
 Func<object, (bool Valida, string Mensagem)> validar = valor =>
 {
+    if (validarMetodo is null || tipoPlatform is null)
+    {
+        return (false, motivoIndisponivel);
+    }
+
     try
     {
-        if (validarComMensagem is not null)
+        object primeiroArgumento;
+        if (validarUsaArray)
         {
-            var args = new object?[] { valor, null };
-            var ok = (bool)(validarComMensagem.Invoke(null, args) ?? false);
+            // Array.CreateInstance e não object[]: o tipo do array precisa ser
+            // exatamente Platform[], senão o Invoke recusa por incompatibilidade.
+            var vetor = Array.CreateInstance(tipoPlatform, 1);
+            vetor.SetValue(valor, 0);
+            primeiroArgumento = vetor;
+        }
+        else
+        {
+            primeiroArgumento = valor;
+        }
+
+        if (validarTemMensagem)
+        {
+            var args = new object?[] { primeiroArgumento, null };
+            var ok = (bool)(validarMetodo.Invoke(null, args) ?? false);
             return (ok, Redigir(args[1] as string, licenca));
         }
 
-        if (validarSimples is not null)
-        {
-            return ((bool)(validarSimples.Invoke(null, new[] { valor }) ?? false), string.Empty);
-        }
-
-        return (false, motivoIndisponivel);
+        return ((bool)(validarMetodo.Invoke(null, new[] { primeiroArgumento }) ?? false), string.Empty);
     }
     catch (Exception erro)
     {
@@ -145,36 +187,43 @@ Func<object, (bool Valida, string Mensagem)> validar = valor =>
     }
 };
 
+// Existir no enum é pergunta SEPARADA de estar licenciado: mesmo sem a API de
+// validação, saber se `WordToPDF` é um nome válido nesta versão já informa.
+Func<string, bool> existeNoEnum = nome =>
+{
+    if (tipoPlatform is null)
+    {
+        return false;
+    }
+
+    try
+    {
+        return Enum.IsDefined(tipoPlatform, nome);
+    }
+    catch
+    {
+        return false;
+    }
+};
+
 // As três que decidem se este serviço pode existir sem marca d'água.
 var focos = new Dictionary<string, ResultadoDeLicenca>(StringComparer.Ordinal);
 foreach (var nome in new[] { "WordToPDF", "Word", "WordEditor" })
 {
-    if (!apiDisponivel || tipoPlatform is null)
-    {
-        focos[nome] = new ResultadoDeLicenca(false, false, motivoIndisponivel);
-        continue;
-    }
-
-    object? valor = null;
-    try
-    {
-        if (Enum.IsDefined(tipoPlatform, nome))
-        {
-            valor = Enum.Parse(tipoPlatform, nome);
-        }
-    }
-    catch
-    {
-        valor = null;
-    }
-
-    if (valor is null)
+    var existe = existeNoEnum(nome);
+    if (!existe)
     {
         focos[nome] = new ResultadoDeLicenca(false, false, $"Platform.{nome} não existe nesta versão.");
         continue;
     }
 
-    var (valida, mensagem) = validar(valor);
+    if (!apiDisponivel)
+    {
+        focos[nome] = new ResultadoDeLicenca(false, true, motivoIndisponivel);
+        continue;
+    }
+
+    var (valida, mensagem) = validar(Enum.Parse(tipoPlatform!, nome));
     focos[nome] = new ResultadoDeLicenca(valida, true, mensagem);
 }
 
@@ -237,6 +286,8 @@ app.MapGet("/api/documenteditor/LicenseStatus", () => Results.Json(new
     versaoDocIORenderer,
     apiDeValidacaoDisponivel = apiDisponivel,
     motivoIndisponivel,
+    assinaturasValidateLicense,
+    metodosDoProvider,
     focos = focos.ToDictionary(
         par => par.Key,
         par => new { par.Value.Valida, par.Value.ExisteNestaVersao, par.Value.Mensagem }),
